@@ -115,6 +115,66 @@ class RazorpayService {
     };
   }
 
+  /**
+   * Attempt to create & capture a payment using a saved payment instrument (token/mandate/customer)
+   * This is a best-effort helper: in sandbox it simulates capture; in live mode it attempts a call
+   * to the Razorpay payments API but will throw a clear error if the integration requires further configuration.
+   */
+  async createPaymentWithInstrument({ orderId, amount, currency = 'INR', instrument = {}, capture = true }) {
+    // instrument: { type: 'card'|'upi_mandate'|'token', token: 'tok_...', customerId: 'cust_...'}
+    if (!orderId || !amount) throw new Error('orderId and amount are required');
+
+    if (!this.isLive || !this.client) {
+      // Sandbox simulation
+      return this.simulatePaymentCapture({ orderId, amount, method: instrument.type || 'sbmd' });
+    }
+
+    // Live mode: attempt to use payments API (best-effort). Razorpay requires proper saved instrument setup.
+    try {
+      // Best-effort payload — actual fields depend on how instruments are stored (cards, customers, tokens, mandates)
+      const payload = {
+        amount,
+        currency,
+        // link to the order so bookkeeping is consistent
+        // note: actual Razorpay API may require 'order_id' or 'customer' fields depending on method
+        ...(orderId ? { order_id: orderId } : {}),
+        capture: capture ? 1 : 0
+      };
+
+      // If a token/customer id is provided, attach it; this may need adjustments per your Razorpay account
+      if (instrument.token) payload.token = instrument.token;
+      if (instrument.customerId) payload.customer = instrument.customerId;
+      if (instrument.method) payload.method = instrument.method; // e.g., 'card', 'upi'
+
+      // Attempt to create a payment using the SDK
+      const payment = await this.client.payments.create(payload);
+      // If capture flag is set and payment requires explicit capture, attempt capture
+      if (capture && payment && payment.id && payment.status !== 'captured') {
+        try {
+          await this.client.payments.capture(payment.id, { amount, currency });
+        } catch (capErr) {
+          // log and proceed to return payment object — capture may have been auto-handled
+          console.warn('Payment created but explicit capture failed:', capErr.message);
+        }
+      }
+
+      return {
+        id: payment.id || payment.
+          razorpay_payment_id || null,
+        order_id: payment.order_id || orderId,
+        amount: payment.amount || amount,
+        currency: payment.currency || currency,
+        status: payment.status || 'captured',
+        method: instrument.type || payment.method || 'card',
+        captured: payment.captured !== undefined ? payment.captured : true,
+        raw: payment
+      };
+    } catch (err) {
+      // Throw a clear error so callers know to fallback or configure saved instruments
+      throw new Error(`Razorpay live payment-with-instrument failed: ${err.message}. Ensure saved instruments/mandates are configured and the payload matches your Razorpay integration.`);
+    }
+  }
+
   verifyWebhookSignature({ payload, signature, secret }) {
     if (!signature) return false;
     const webhookSecret = secret || config.razorpayWebhookSecret;

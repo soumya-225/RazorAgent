@@ -40,7 +40,7 @@ router.post('/chat', optionalMerchantAuth, async (req, res) => {
  */
 router.post('/checkout', optionalMerchantAuth, async (req, res) => {
   try {
-    const { items, customer, couponCode, sessionId = 'checkout_session' } = req.body;
+    const { items, customer, couponCode, sessionId = 'checkout_session', sbmdPaymentMethod = null } = req.body;
     const merchantId = req.merchant?.id || null;
 
     const result = await checkoutAgent.createOrder({
@@ -49,6 +49,7 @@ router.post('/checkout', optionalMerchantAuth, async (req, res) => {
       items,
       customer,
       couponCode,
+      sbmdPaymentMethod,
       explanation: 'Customer placed order via RazorAgent Checkout'
     });
 

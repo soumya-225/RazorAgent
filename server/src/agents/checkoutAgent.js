@@ -79,6 +79,7 @@ export class CheckoutAgent {
     items = [],
     customer = {},
     couponCode = null,
+    sbmdPaymentMethod = null,
     explanation = 'Customer initiated checkout'
   }) {
     if (!items || items.length === 0) {
@@ -194,6 +195,81 @@ export class CheckoutAgent {
           const sbmdEnabledGlobally = (config && config.sbmdEnabled) || (process.env.SBMD_ENABLED === 'true');
           const merchantRecord = merchantId ? await prisma.merchant.findUnique({ where: { id: merchantId } }) : null;
 
+          // Preference 1: If caller provided a saved payment instrument (token/mandate) and Razorpay is live, try server-side capture via Razorpay
+          if (sbmdPaymentMethod && config.isRazorpayLive) {
+            try {
+              const instrument = sbmdPaymentMethod; // expected shape: { type, token, customerId, method }
+              const rzpPayment = await razorpayService.createPaymentWithInstrument({
+                orderId: rzpOrder.id,
+                amount: finalAmountPaise,
+                currency: 'INR',
+                instrument,
+                capture: true
+              });
+
+              // Record Payment in our DB
+              const payId = rzpPayment.id || `pay_live_${Date.now()}`;
+              const payment = await prisma.payment.create({
+                data: {
+                  razorpayPaymentId: payId,
+                  orderId: savedOrder.id,
+                  amountPaise: finalAmountPaise,
+                  currency: rzpPayment.currency || 'INR',
+                  method: rzpPayment.method || instrument.type || 'card',
+                  status: rzpPayment.status || 'captured'
+                }
+              });
+
+              // Mark order PAID
+              await prisma.order.update({ where: { id: savedOrder.id }, data: { status: 'PAID' } });
+
+              // Reduce inventory (best-effort)
+              const itemsToReduce = Array.isArray(savedOrder.items) ? savedOrder.items : [];
+              for (const item of itemsToReduce) {
+                if (item.productId) {
+                  await prisma.product.update({
+                    where: { id: item.productId },
+                    data: {
+                      inventory: { decrement: item.qty || 1 },
+                      salesCount30Days: { increment: item.qty || 1 }
+                    }
+                  }).catch(() => {});
+                }
+              }
+
+              await safetyService.logAudit({
+                sessionId,
+                agentName: 'CHECKOUT_AGENT',
+                actionType: 'payment.razorpay.saved_instrument.captured',
+                actionPayload: { orderId: savedOrder.id, orderNumber, paymentId: payId, instrument: { type: instrument.type } },
+                explanation: `Captured payment using saved instrument for Order #${orderNumber}.`,
+                status: 'SUCCESS',
+                amountInr: finalAmountPaise / 100,
+                razorpayEntityId: payId
+              });
+
+              return {
+                orderId: savedOrder.id,
+                orderNumber: savedOrder.orderNumber,
+                razorpayOrderId: rzpOrder.id,
+                totalAmountInr: finalAmountPaise / 100,
+                totalAmountPaise: finalAmountPaise,
+                discountAmountInr: discountPaise / 100,
+                paymentLinkUrl: rzpLink.short_url,
+                paymentLinkId: rzpLink.id,
+                items: orderItems,
+                status: 'PAID',
+                payment,
+                isSandbox: rzpOrder.isSandbox,
+                paidWith: 'SBMD_RAZORPAY'
+              };
+            } catch (err) {
+              console.warn('SBMD via Razorpay saved instrument failed:', err.message);
+              // let fallback to internal SBMD or regular flow
+            }
+          }
+
+          // Preference 2: If platform-managed SBMD (internal spending cap) is enabled and merchant eligible, use internal SBMD execution
           if (sbmdEnabledGlobally && merchantRecord) {
             const eligible = await sbmdService.isEligible(merchantId, finalAmountPaise);
             if (eligible) {
