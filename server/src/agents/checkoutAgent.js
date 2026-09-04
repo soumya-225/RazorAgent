@@ -2,6 +2,8 @@ import prisma from '../config/db.js';
 import razorpayService from '../services/razorpayService.js';
 import safetyService from '../services/safetyService.js';
 import merchantRegistryService from '../services/merchantRegistryService.js';
+import sbmdService from '../services/sbmdService.js';
+import config from '../config/env.js';
 import { callLLM } from './llmClient.js';
 
 export class CheckoutAgent {
@@ -187,6 +189,49 @@ export class CheckoutAgent {
           }
         });
 
+        // 4. Attempt automatic SBMD capture when enabled and merchant has sufficient allocated funds
+        try {
+          const sbmdEnabledGlobally = (config && config.sbmdEnabled) || (process.env.SBMD_ENABLED === 'true');
+          const merchantRecord = merchantId ? await prisma.merchant.findUnique({ where: { id: merchantId } }) : null;
+
+          if (sbmdEnabledGlobally && merchantRecord) {
+            const eligible = await sbmdService.isEligible(merchantId, finalAmountPaise);
+            if (eligible) {
+              try {
+                const sbmdPayment = await sbmdService.executePayment({
+                  merchantId,
+                  orderId: savedOrder.id,
+                  amountPaise: finalAmountPaise,
+                  orderNumber,
+                  sessionId
+                });
+
+                return {
+                  orderId: savedOrder.id,
+                  orderNumber: savedOrder.orderNumber,
+                  razorpayOrderId: rzpOrder.id,
+                  totalAmountInr: finalAmountPaise / 100,
+                  totalAmountPaise: finalAmountPaise,
+                  discountAmountInr: discountPaise / 100,
+                  paymentLinkUrl: rzpLink.short_url,
+                  paymentLinkId: rzpLink.id,
+                  items: orderItems,
+                  status: 'PAID',
+                  payment: sbmdPayment,
+                  isSandbox: rzpOrder.isSandbox,
+                  paidWith: 'SBMD'
+                };
+              } catch (err) {
+                console.warn('SBMD automatic capture failed:', err.message);
+                // fall-through to return created order (CREATED)
+              }
+            }
+          }
+        } catch (err) {
+          console.warn('SBMD eligibility check failed:', err.message);
+        }
+
+        // Default: return created order info (payment to be completed via payment link / checkout)
         return {
           orderId: savedOrder.id,
           orderNumber: savedOrder.orderNumber,
