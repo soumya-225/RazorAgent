@@ -1,0 +1,25 @@
+{
+  "name": "razoragent",
+  "version": "1.0.0",
+  "description": "RazorAgent — AI Growth & Agentic Commerce Platform",
+  "type": "module",
+  "scripts": {
+    "install:all": "npm install --prefix server && npm install --prefix client",
+    "db:push": "npm run db:push --prefix server",
+    "db:seed": "npm run db:seed --prefix server",
+    "server": "npm run dev --prefix server",
+    "client": "npm run dev --prefix client",
+    "start": "node start-all.js"
+  },
+  "keywords": [
+    "agentic-commerce",
+    "ai-agents",
+    "razorpay",
+    "acp",
+    "x402",
+    "openai",
+    "growth"
+  ],
+  "author": "",
+  "license": "MIT"
+}

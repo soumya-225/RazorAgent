@@ -1,0 +1,123 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Merchant {
+  id                    String             @id @default(uuid())
+  email                 String             @unique
+  passwordHash          String
+  name                  String
+  storeName             String             @default("RazorAgent Store")
+  currency              String             @default("INR")
+  spendingCapPaise      Int                @default(1000000) // ₹10,000
+  approvalThresholdPaise Int               @default(500000)  // ₹5,000
+  apiKey                String             @unique @default(uuid())
+  products              Product[]
+  orders                Order[]
+  campaigns             Campaign[]
+  approvalRequests      ApprovalRequest[]
+  createdAt             DateTime           @default(now())
+  updatedAt             DateTime           @updatedAt
+}
+
+model Product {
+  id               String   @id @default(uuid())
+  sku              String   @unique
+  name             String
+  description      String
+  pricePaise       Int      // in paise (e.g. 249900 = ₹2,499.00)
+  costPaise        Int      // for margin computation (e.g. 120000 = ₹1,200.00)
+  category         String
+  inventory        Int      @default(50)
+  salesCount30Days Int      @default(0)
+  imageUrl         String?
+  inStock          Boolean  @default(true)
+  merchantId       String?
+  merchant         Merchant? @relation(fields: [merchantId], references: [id], onDelete: SetNull)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+}
+
+model Order {
+  id                 String    @id @default(uuid())
+  orderNumber        String    @unique
+  razorpayOrderId    String?   @unique
+  merchantId         String?
+  merchant           Merchant? @relation(fields: [merchantId], references: [id], onDelete: SetNull)
+  customerName       String?
+  customerEmail      String?
+  customerPhone      String?
+  totalAmountPaise   Int
+  discountAmountPaise Int      @default(0)
+  currency           String    @default("INR")
+  status             String    @default("CREATED") // CREATED, PAID, TIMED_OUT, FAILED, REFUNDED
+  items              Json      // array of { productId, sku, name, qty, pricePaise }
+  paymentLinkUrl     String?
+  razorpayPaymentLinkId String?
+  metadata           Json?
+  payments           Payment[]
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+}
+
+model Payment {
+  id                String   @id @default(uuid())
+  razorpayPaymentId String   @unique
+  orderId           String
+  order             Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  amountPaise       Int
+  currency          String   @default("INR")
+  method            String   @default("card")
+  status            String   @default("captured") // captured, failed, refunded
+  createdAt         DateTime @default(now())
+}
+
+model Campaign {
+  id                   String    @id @default(uuid())
+  merchantId           String?
+  merchant             Merchant? @relation(fields: [merchantId], references: [id], onDelete: SetNull)
+  name                 String
+  type                 String    @default("INVENTORY_CLEARANCE") // INVENTORY_CLEARANCE, FLASH_SALE, BUNDLE_PROMO
+  discountPercent      Int       @default(15)
+  couponCode           String    @unique
+  targetSkus           Json      // array of SKUs targeted
+  paymentLinkUrl       String?
+  razorpayPaymentLinkId String?
+  reasoning            String    // Claude/GPT explainability reasoning
+  status               String    @default("ACTIVE") // ACTIVE, EXPIRED, ARCHIVED
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+}
+
+model AuditLog {
+  id               String   @id @default(uuid())
+  sessionId        String?
+  agentName        String   // CATALOG_AGENT, CHECKOUT_AGENT, UPSELL_AGENT, CAMPAIGN_AGENT, BUYER_AGENT, SAFETY_GATE, RAZORPAY_WEBHOOK
+  actionType       String   // create_order, execute_payment, apply_discount, check_spending_limit, generate_payment_link, etc.
+  actionPayload    Json?
+  explanation      String   // plain-English reasoning for the action
+  status           String   // PENDING, SUCCESS, FAILED, BLOCKED, WAITING_APPROVAL
+  amountInr        Float?
+  razorpayEntityId String?
+  createdAt        DateTime @default(now())
+}
+
+model ApprovalRequest {
+  id          String    @id @default(uuid())
+  merchantId  String?
+  merchant    Merchant? @relation(fields: [merchantId], references: [id], onDelete: SetNull)
+  sessionId   String?
+  agentName   String
+  actionType  String
+  payload     Json
+  amountInr   Float
+  reasoning   String
+  status      String    @default("PENDING") // PENDING, APPROVED, REJECTED
+  reviewedAt  DateTime?
+  createdAt   DateTime  @default(now())
+}
