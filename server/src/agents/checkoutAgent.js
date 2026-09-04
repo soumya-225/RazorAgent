@@ -1,6 +1,7 @@
 import prisma from '../config/db.js';
 import razorpayService from '../services/razorpayService.js';
 import safetyService from '../services/safetyService.js';
+import merchantRegistryService from '../services/merchantRegistryService.js';
 import { callLLM } from './llmClient.js';
 
 export class CheckoutAgent {
@@ -209,18 +210,30 @@ export class CheckoutAgent {
    * Process incoming user chat message in conversational checkout
    */
   async processUserMessage({ merchantId, sessionId, userMessage, conversationHistory = [], cart = [] }) {
-    const products = await prisma.product.findMany({ where: { inStock: true }, take: 10 });
-    const productCatalogBrief = products.map(p => `${p.name} (SKU: ${p.sku}, Price: ₹${p.pricePaise / 100}, Category: ${p.category})`).join('\n');
+    const merchants = await merchantRegistryService.getAllMerchants();
+    const products = await prisma.product.findMany({ where: { inStock: true }, take: 15 });
 
-    const systemPrompt = `You are RazorAgent's Conversational Checkout Agent.
-Merchant Catalog:
+    const merchantRegistryBrief = merchants.map(m =>
+      `- Store: "${m.storeName}" (${m.name}) | Categories: ${m.categories.join(', ')} | Active Promo: ${m.activeCoupon ? `${m.activeCoupon} (${m.discountPercent}% OFF)` : 'None'}`
+    ).join('\n');
+
+    const productCatalogBrief = products.map(p =>
+      `${p.name} (SKU: ${p.sku}, Price: ₹${p.pricePaise / 100}, Category: ${p.category})`
+    ).join('\n');
+
+    const systemPrompt = `You are RazorAgent's Conversational Checkout & Network Registry Agent.
+Merchant Network Registry (4 Active Merchants):
+${merchantRegistryBrief}
+
+Active Product Catalog:
 ${productCatalogBrief}
 
 Your role:
-1. Help users discover products from the catalog.
-2. If the user wants to buy or order items, confirm the items and specify their details.
-3. If the user asks for a discount or enters a coupon code, acknowledge it.
-4. Keep replies friendly, concise, and helpful.
+1. Help users discover products across all registered merchants in the network.
+2. If the user asks about merchants, store deals, or price comparisons, guide them using the Merchant Registry info.
+3. If the user wants to buy or order items, confirm the items and specify their details.
+4. If the user asks for a discount or enters a coupon code (e.g., WELCOME10, VOLT20, NEXUS15, DESK10), acknowledge it.
+5. Keep replies friendly, concise, and helpful.
 
 If the user clearly intends to purchase items, output a JSON action block at the very end formatted as:
 ACTION: {"intent": "CHECKOUT", "items": [{"sku": "SKU_CODE", "qty": 1}], "coupon": "OPTIONAL_CODE"}

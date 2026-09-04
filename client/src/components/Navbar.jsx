@@ -7,6 +7,7 @@ export default function Navbar({ activeTab, setActiveTab }) {
 
   const navItems = [
     { id: 'overview', label: 'Dashboard', icon: Layers },
+    { id: 'registry', label: 'Merchant Registry', icon: Store },
     { id: 'storefront', label: 'Store & Checkout AI', icon: Store },
     { id: 'campaigns', label: 'Revenue Campaigns', icon: Sparkles },
     { id: 'buyer', label: 'AI Buyer Simulator', icon: Bot },

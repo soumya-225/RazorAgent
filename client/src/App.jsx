@@ -4,6 +4,7 @@ import Navbar from './components/Navbar';
 import Overview from './pages/Overview';
 import CatalogManager from './pages/CatalogManager';
 import StorefrontChat from './pages/StorefrontChat';
+import MerchantRegistry from './pages/MerchantRegistry';
 import CampaignManager from './pages/CampaignManager';
 import AIBuyerPlayground from './pages/AIBuyerPlayground';
 import AuditTrail from './pages/AuditTrail';
@@ -33,6 +34,7 @@ function MainApp() {
       {/* Main Content Area */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
         {activeTab === 'overview' && <Overview setActiveTab={setActiveTab} />}
+        {activeTab === 'registry' && <MerchantRegistry />}
         {activeTab === 'catalog' && <CatalogManager />}
         {activeTab === 'storefront' && <StorefrontChat />}
         {activeTab === 'campaigns' && <CampaignManager />}

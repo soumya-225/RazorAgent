@@ -2,6 +2,7 @@ import axios from 'axios';
 import prisma from '../config/db.js';
 import safetyService from '../services/safetyService.js';
 import razorpayService from '../services/razorpayService.js';
+import merchantRegistryService from '../services/merchantRegistryService.js';
 import { callLLM } from './llmClient.js';
 
 export class BuyerAgent {
@@ -33,51 +34,32 @@ export class BuyerAgent {
       });
     };
 
-    // Step 1: Discover ACP Agent Card
-    logStep(1, 'Discover ACP Agent Card', `Reading discovery metadata at ${merchantBaseUrl}/.well-known/agent.json`);
-    let agentCard = null;
-    try {
-      // In local mode, we can fetch via direct db/route or axios
-      const cardRes = await axios.get(`${merchantBaseUrl}/.well-known/agent.json`, { timeout: 3000 }).catch(() => null);
-      if (cardRes && cardRes.data) {
-        agentCard = cardRes.data;
-      } else {
-        // Fallback internal card
-        agentCard = {
-          name: "RazorAgent Demo Merchant",
-          description: "Electronics merchant accepting autonomous AI orders",
-          capabilities: ["catalog.browse", "catalog.search", "checkout.create", "checkout.pay"],
-          protocols: ["x402", "acp/1.0"],
-          catalog_endpoint: "/api/catalog",
-          checkout_endpoint: "/api/protocol/checkout",
-          currency: "INR",
-          min_order: 100
-        };
-      }
-      logStep(1, 'Agent Card Discovered', `Protocols: ${agentCard.protocols.join(', ')} | Capabilities: ${agentCard.capabilities.join(', ')}`);
-      
-      await safetyService.logAudit({
-        sessionId,
-        agentName: this.name,
-        actionType: 'discover_agent_card',
-        actionPayload: { protocols: agentCard.protocols, capabilities: agentCard.capabilities },
-        explanation: `Autonomous buyer agent read merchant ACP card. Discovered support for x402 payment protocol and JSON-LD catalog.`,
-        status: 'SUCCESS'
-      });
-    } catch (err) {
-      logStep(1, 'Agent Card Discovery Note', `Using standard ACP protocol specifications.`);
-    }
+    // Step 1: Query Merchant Registry & Compare Deals
+    logStep(1, 'Discover Merchant Registry', `Reading multi-merchant registry to identify stores matching objective: "${objective}"`);
+    const registeredMerchants = await merchantRegistryService.getAllMerchants();
+    const dealComparison = await merchantRegistryService.findBestDeals({ query: objective, maxBudgetInr: budgetInr });
+    
+    logStep(1, 'Registry Scan Complete', `Discovered ${registeredMerchants.length} active merchants. ${dealComparison.aiComparisonSummary || `Best store deal identified at ${dealComparison.bestDeal?.storeName || 'AeroTech Gadgets'}`}`);
 
-    // Step 2: Query JSON-LD Structured Catalog
-    logStep(2, 'Query JSON-LD Catalog', `Fetching structured product catalog matching objective: "${objective}"`);
-    const allProducts = await prisma.product.findMany({ where: { inStock: true } });
+    await safetyService.logAudit({
+      sessionId,
+      agentName: this.name,
+      actionType: 'discover_merchant_registry',
+      actionPayload: { merchantsCount: registeredMerchants.length, bestDeal: dealComparison.bestDeal },
+      explanation: `Buyer agent scanned network registry of ${registeredMerchants.length} merchants. Selected ${dealComparison.bestDeal?.storeName || 'primary merchant'} based on price comparison & active promo codes.`,
+      status: 'SUCCESS'
+    });
+
+    // Step 2: Query Structured Merchant Catalogs
+    logStep(2, 'Query Multi-Merchant Catalog', `Fetching product catalog across ${registeredMerchants.length} merchants matching objective: "${objective}"`);
+    const allProducts = await prisma.product.findMany({ where: { inStock: true }, include: { merchant: true } });
     
     await safetyService.logAudit({
       sessionId,
       agentName: this.name,
       actionType: 'read_catalog',
       actionPayload: { objective, itemCount: allProducts.length },
-      explanation: `Buyer agent parsed JSON-LD catalog containing ${allProducts.length} active products.`,
+      explanation: `Buyer agent parsed cross-merchant catalog containing ${allProducts.length} active products.`,
       status: 'SUCCESS'
     });
 

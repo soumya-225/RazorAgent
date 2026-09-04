@@ -5,6 +5,7 @@ import config from './config/env.js';
 // Route imports
 import authRoutes from './routes/auth.routes.js';
 import productsRoutes from './routes/products.routes.js';
+import merchantsRoutes from './routes/merchants.routes.js';
 import protocolRoutes from './routes/protocol.routes.js';
 import agentsRoutes from './routes/agents.routes.js';
 import safetyRoutes from './routes/safety.routes.js';
@@ -45,6 +46,7 @@ app.use(protocolRoutes);
 // Mount Application Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/products', productsRoutes);
+app.use('/api/merchants', merchantsRoutes);
 app.use('/api/orders', ordersRoutes);
 app.use('/api/agents', agentsRoutes);
 app.use('/api/safety', safetyRoutes);
