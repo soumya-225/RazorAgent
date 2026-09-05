@@ -76,9 +76,48 @@ router.get('/metrics/summary', optionalMerchantAuth, async (req, res) => {
     });
     const auditEventsCount = await prisma.auditLog.count();
 
-    const lowStockCount = await prisma.product.count({
-      where: { inventory: { lte: 5 }, ...(req.merchant?.id ? { merchantId: req.merchant.id } : {}) }
+    // Compute 7-day daily revenue breakdown
+    const now = new Date();
+    const revenueByDay = [];
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date(now);
+      d.setDate(now.getDate() - i);
+      const dayStr = d.toISOString().slice(0, 10);
+      const dayName = d.toLocaleDateString('en-US', { weekday: 'short' });
+      const dayOrders = paidOrders.filter(o => {
+        const orderDateStr = new Date(o.createdAt).toISOString().slice(0, 10);
+        return orderDateStr === dayStr;
+      });
+      const dayRevenueInr = Math.round(dayOrders.reduce((s, o) => s + (o.totalAmountPaise || 0), 0) / 100);
+      revenueByDay.push({
+        date: dayStr,
+        dayName,
+        label: `${dayName} (${dayStr.slice(5)})`,
+        revenueInr: dayRevenueInr,
+        orderCount: dayOrders.length
+      });
+    }
+
+    // Top products by revenue
+    const productRevenue = {};
+    paidOrders.forEach(o => {
+      const items = Array.isArray(o.items)
+        ? o.items
+        : typeof o.items === 'string'
+          ? JSON.parse(o.items || '[]')
+          : [];
+      items.forEach(item => {
+        const sku = item.sku || 'UNKNOWN';
+        if (!productRevenue[sku]) {
+          productRevenue[sku] = { sku, name: item.name || sku, revenueInr: 0, qty: 0 };
+        }
+        productRevenue[sku].revenueInr += Math.round(((item.pricePaise || (item.priceInr ? item.priceInr * 100 : 0)) * (item.quantity || item.qty || 1)) / 100);
+        productRevenue[sku].qty += (item.quantity || item.qty || 1);
+      });
     });
+    const topProducts = Object.values(productRevenue)
+      .sort((a, b) => b.revenueInr - a.revenueInr)
+      .slice(0, 5);
 
     return res.json({
       totalRevenueInr: totalRevenuePaise / 100,
@@ -88,7 +127,8 @@ router.get('/metrics/summary', optionalMerchantAuth, async (req, res) => {
       activeCampaigns,
       pendingApprovals,
       auditEventsCount,
-      lowStockCount
+      revenueByDay,
+      topProducts
     });
   } catch (err) {
     return res.status(500).json({ error: err.message });

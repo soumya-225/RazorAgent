@@ -1,25 +1,18 @@
 import React, { useState } from 'react';
 import {
-  LayoutDashboard, Package, Sparkles, Code2, ShieldCheck, ClipboardList,
-  ChevronLeft, LogOut, Store, Zap, Bot, AlertTriangle, Menu, X
+  LayoutDashboard, Package, Sparkles, Code2, LogOut, Zap, Menu, X
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import Overview from './Overview';
 import CatalogManager from './CatalogManager';
 import CampaignManager from './CampaignManager';
 import APIExplorer from './APIExplorer';
-import AuditTrail from './AuditTrail';
-import AIBuyerPlayground from './AIBuyerPlayground';
-import FailureLab from './FailureLab';
 
 const NAV_ITEMS = [
   { id: 'overview',   label: 'Dashboard',         icon: LayoutDashboard, description: 'Revenue & analytics' },
   { id: 'catalog',    label: 'Products',           icon: Package,         description: 'Manage catalog' },
   { id: 'campaigns',  label: 'Revenue Campaigns',  icon: Sparkles,        description: 'AI-powered campaigns' },
   { id: 'api',        label: 'API Explorer',       icon: Code2,           description: 'External agent API' },
-  { id: 'buyer',      label: 'AI Buyer Simulator', icon: Bot,             description: 'Test autonomous buyers' },
-  { id: 'audit',      label: 'Audit Trail',        icon: ShieldCheck,     description: 'Safety & logs' },
-  { id: 'failure-lab',label: 'Failure Lab',        icon: AlertTriangle,   description: 'Recovery testing' },
 ];
 
 export default function MerchantApp({ onSwitchRole }) {
@@ -72,12 +65,6 @@ export default function MerchantApp({ onSwitchRole }) {
                 <div className="text-[10px] text-slate-400 truncate">{merchant?.email}</div>
               </div>
             </div>
-            <div className="mt-2.5 flex items-center justify-between text-[10px]">
-              <span className="text-slate-500">Spending Cap</span>
-              <span className="font-mono text-blue-400 font-semibold">
-                ₹{merchant?.spendingCapInr?.toLocaleString('en-IN') || '10,000'}
-              </span>
-            </div>
           </div>
         </div>
 
@@ -106,15 +93,8 @@ export default function MerchantApp({ onSwitchRole }) {
         {/* Bottom actions */}
         <div className="p-3 border-t border-slate-800/80 space-y-1">
           <button
-            onClick={() => onSwitchRole('landing')}
-            className="sidebar-item w-full text-slate-500"
-          >
-            <ChevronLeft className="w-4 h-4 shrink-0" />
-            <span className="text-xs">Back to Marketplace</span>
-          </button>
-          <button
             onClick={handleLogout}
-            className="sidebar-item w-full text-red-500 hover:text-red-400 hover:bg-red-500/10"
+            className="sidebar-item w-full text-red-500 hover:text-red-400 hover:bg-red-500/10 cursor-pointer"
           >
             <LogOut className="w-4 h-4 shrink-0" />
             <span className="text-xs">Sign Out</span>
@@ -166,9 +146,6 @@ export default function MerchantApp({ onSwitchRole }) {
             {activeTab === 'catalog'     && <CatalogManager />}
             {activeTab === 'campaigns'   && <CampaignManager />}
             {activeTab === 'api'         && <APIExplorer />}
-            {activeTab === 'buyer'       && <AIBuyerPlayground />}
-            {activeTab === 'audit'       && <AuditTrail />}
-            {activeTab === 'failure-lab' && <FailureLab />}
           </div>
         </main>
       </div>

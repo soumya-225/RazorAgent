@@ -6,12 +6,25 @@ import config from '../config/env.js';
 const router = express.Router();
 
 /**
- * Helper: optionally resolve merchant by API key header
+ * Helper: optionally resolve merchant by API key header or Bearer JWT token
  */
 async function resolveMerchantByApiKey(req) {
   const apiKey = req.headers['x-api-key'] || req.query.api_key;
-  if (!apiKey) return null;
-  return prisma.merchant.findUnique({ where: { apiKey } });
+  if (apiKey) {
+    const merchant = await prisma.merchant.findUnique({ where: { apiKey } });
+    if (merchant) return merchant;
+  }
+  const authHeader = req.headers.authorization;
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    try {
+      const token = authHeader.split(' ')[1];
+      const decoded = jwt.verify(token, config.jwtSecret);
+      if (decoded?.id) {
+        return prisma.merchant.findUnique({ where: { id: decoded.id } });
+      }
+    } catch { /* token invalid */ }
+  }
+  return null;
 }
 
 /**
