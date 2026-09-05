@@ -42,6 +42,28 @@ export default function StorefrontChat() {
   const [approvalRequest, setApprovalRequest] = useState(null);
   const [isApprovalModalOpen, setIsApprovalModalOpen] = useState(false);
 
+  // SBMD Frictionless checkout state
+  const [sbmdToken, setSbmdToken] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('sbmd_token')); } catch { return null; }
+  });
+  const [isSbmdSetupOpen, setIsSbmdSetupOpen] = useState(false);
+  // Auto-activate frictionless mode when a saved token already exists
+  const [checkoutMode, setCheckoutMode] = useState(() => {
+    try { return localStorage.getItem('sbmd_token') ? 'sbmd' : 'standard'; } catch { return 'standard'; }
+  });
+
+  // Refs so async callbacks (e.g. after LLM response) always see the latest values
+  const sbmdTokenRef = useRef(sbmdToken);
+  const checkoutModeRef = useRef(checkoutMode);
+  useEffect(() => { sbmdTokenRef.current = sbmdToken; }, [sbmdToken]);
+  useEffect(() => { checkoutModeRef.current = checkoutMode; }, [checkoutMode]);
+  // When token is set (after setup), also flip mode to sbmd automatically
+  useEffect(() => {
+    if (sbmdToken && checkoutModeRef.current !== 'sbmd') {
+      setCheckoutMode('sbmd');
+    }
+  }, [sbmdToken]);
+
   const messagesEndRef = useRef(null);
 
   useEffect(() => {
@@ -176,7 +198,7 @@ export default function StorefrontChat() {
         return;
       }
 
-      const orderResult = res.data?.result;
+      const orderResult = res.data?.result || res.data;
       if (orderResult) {
         const paidWith = orderResult.paidWith || null;
         const isSbmd = paidWith === 'SBMD';
@@ -252,11 +274,25 @@ export default function StorefrontChat() {
       const res = await api.post('/api/agents/chat', {
         message: userText,
         history: newMessages.slice(-6),
-        cart
+        cart,
+        checkoutMode: sbmdTokenRef.current ? 'sbmd' : checkoutModeRef.current,
+        hasSbmdToken: Boolean(sbmdTokenRef.current)
       });
 
-      const reply = res.data?.reply || "I'm ready to help you assemble your order.";
+      let reply = res.data?.reply || "I'm ready to help you assemble your order.";
       const action = res.data?.action;
+
+      // If SBMD token exists and agent is triggering a checkout,
+      // replace any "Razorpay" / "payment window" language with frictionless language.
+      if (action?.intent === 'CHECKOUT' && sbmdTokenRef.current) {
+        reply = reply
+          .replace(/opening razorpay.*?\./gi, '⚡ Processing frictionless payment...')
+          .replace(/complete.*?payment.*?modal\.?/gi, '⚡ Processing instantly via your saved token...')
+          .replace(/razorpay (checkout|payment) (window|page|modal)/gi, 'frictionless payment')
+          .trim();
+        // Append frictionless indicator if not already present
+        if (!reply.includes('⚡')) reply += ' ⚡ Auto-checkout triggered — processing your order now...';
+      }
 
       setMessages([
         ...newMessages,
@@ -363,6 +399,18 @@ export default function StorefrontChat() {
   const handleInitiateCheckout = () => {
     if (cart.length === 0) return;
     executeCheckout(null, appliedCoupon?.code || null);
+  };
+
+  const handleSbmdSetupSuccess = ({ customerId, tokenId, isSandbox }) => {
+    const token = { customerId, tokenId, isSandbox: isSandbox || false };
+    setSbmdToken(token);
+    localStorage.setItem('sbmd_token', JSON.stringify(token));
+    setIsSbmdSetupOpen(false);
+    setMessages(prev => [...prev, {
+      role: 'assistant',
+      content: `✅ **Frictionless checkout enabled!** Your payment method is saved. Future purchases will be captured instantly from your SBMD reserve — no checkout page, no PIN.`,
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    }]);
   };
 
   const handleAcceptBundleOffer = () => {
@@ -551,8 +599,28 @@ export default function StorefrontChat() {
               <span className="text-[11px] font-mono text-slate-400">{cart.length} SKUs</span>
             </div>
 
+            {/* SBMD setup — always visible regardless of cart state */}
+            {!sbmdToken ? (
+              <button
+                onClick={() => setIsSbmdSetupOpen(true)}
+                className="w-full py-2 px-3 rounded-xl bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/30 text-emerald-400 text-xs font-semibold flex items-center justify-center gap-2 transition-all"
+              >
+                <Zap className="w-3 h-3" />
+                Enable Frictionless Pay (One-time setup)
+              </button>
+            ) : (
+              <div className="flex items-center gap-2 text-[10px] text-emerald-400 bg-emerald-500/10 rounded-lg p-2 border border-emerald-500/20">
+                <CheckCircle className="w-3 h-3 shrink-0" />
+                <span>⚡ Frictionless pay active</span>
+                <button
+                  onClick={() => { setSbmdToken(null); setCheckoutMode('standard'); localStorage.removeItem('sbmd_token'); }}
+                  className="ml-auto text-slate-500 hover:text-red-400 transition-colors text-[11px]"
+                >✕</button>
+              </div>
+            )}
+
             {cart.length === 0 ? (
-              <div className="py-8 text-center text-xs text-slate-500">
+              <div className="py-6 text-center text-xs text-slate-500">
                 Your cart is empty. Add products from the catalog or type in chat!
               </div>
             ) : (

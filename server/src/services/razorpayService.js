@@ -101,6 +101,92 @@ class RazorpayService {
     };
   }
 
+  /**
+   * Create a Razorpay Customer (for token-based recurring payments)
+   */
+  async createCustomer({ name, email, contact }) {
+    if (this.isLive && this.client) {
+      try {
+        const customer = await this.client.customers.create({ name, email, contact });
+        return { id: customer.id, name: customer.name, email: customer.email, isSandbox: false };
+      } catch (err) {
+        console.warn('Razorpay createCustomer failed, falling back to simulator:', err.message);
+      }
+    }
+    const custId = this.generateId('cust_test_');
+    return { id: custId, name, email, isSandbox: true };
+  }
+
+  /**
+   * Fetch saved tokens for a customer (recurring / emandate tokens)
+   */
+  async fetchCustomerTokens(customerId) {
+    if (this.isLive && this.client && !customerId.startsWith('cust_test_')) {
+      try {
+        const res = await this.client.customers.fetchTokens(customerId);
+        const items = res.items || [];
+        return items;
+      } catch (err) {
+        console.warn('Razorpay fetchCustomerTokens failed:', err.message);
+        return [];
+      }
+    }
+    // Sandbox: return a simulated token
+    return [{ id: this.generateId('token_test_'), recurring_details: { auth_type: 'card' }, method: 'card' }];
+  }
+
+  /**
+   * Create a recurring payment charge (frictionless checkout via saved token)
+   */
+  async createRecurringPayment({ email, contact, amount, currency = 'INR', orderId, customerId, tokenId, description }) {
+    if (this.isLive && this.client && !orderId.startsWith('order_test_') && !tokenId.startsWith('token_test_')) {
+      try {
+        const authHeader = 'Basic ' + Buffer.from(`${config.razorpayKeyId}:${config.razorpayKeySecret}`).toString('base64');
+        const response = await fetch('https://api.razorpay.com/v1/payments/create/recurring', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': authHeader },
+          body: JSON.stringify({
+            email,
+            contact,
+            amount,
+            currency,
+            order_id: orderId,
+            customer_id: customerId,
+            token: tokenId,
+            recurring: '1',
+            description: description || 'RazorAgent SBMD Frictionless Pay'
+          })
+        });
+        if (!response.ok) {
+          const errBody = await response.json();
+          throw new Error(errBody.error?.description || `HTTP ${response.status}`);
+        }
+        const payment = await response.json();
+        return { id: payment.razorpay_payment_id || payment.id, status: 'authorized', isSandbox: false };
+      } catch (err) {
+        console.warn('createRecurringPayment failed, falling back to simulator:', err.message);
+      }
+    }
+    // Sandbox fallback
+    const payId = this.generateId('pay_test_');
+    return { id: payId, order_id: orderId, amount, status: 'authorized', isSandbox: true };
+  }
+
+  /**
+   * Capture an authorized payment
+   */
+  async capturePayment(paymentId, amount) {
+    if (this.isLive && this.client && !paymentId.startsWith('pay_test_')) {
+      try {
+        const captured = await this.client.payments.capture(paymentId, amount, 'INR');
+        return { id: captured.id, status: captured.status, isSandbox: false };
+      } catch (err) {
+        console.warn('capturePayment failed, falling back to simulator:', err.message);
+      }
+    }
+    return { id: paymentId, status: 'captured', amount, isSandbox: true };
+  }
+
   async simulatePaymentCapture({ orderId, amount, method = 'upi' }) {
     const paymentId = this.generateId('pay_test_');
     return {

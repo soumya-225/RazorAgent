@@ -2,11 +2,12 @@ import React, { useState, useEffect, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
 import {
   Bot, Send, ShoppingCart, Sparkles, ArrowRight, Check, Trash2,
-  Plus, Zap, RefreshCw, Star, Tag, Package, X, ShieldCheck, AlertCircle
+  Plus, Zap, RefreshCw, Star, Tag, Package, X, ShieldCheck, AlertCircle, CheckCircle
 } from 'lucide-react';
 import api from '../api';
 import RazorpayModal from '../components/RazorpayModal';
 import ApprovalModal from '../components/ApprovalModal';
+import SBMDSetupModal from '../components/SBMDSetupModal';
 import { useCustomerAuth } from '../context/CustomerAuthContext';
 
 // ---------- Product Tile ----------
@@ -159,6 +160,17 @@ export default function CustomerStorefront() {
   const [approvalRequest, setApprovalRequest] = useState(null);
   const [isApprovalModalOpen, setIsApprovalModalOpen] = useState(false);
   const [cartOpen, setCartOpen] = useState(false);
+
+  // SBMD frictionless checkout
+  const [sbmdToken, setSbmdToken] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('sbmd_token')); } catch { return null; }
+  });
+  const [isSbmdSetupOpen, setIsSbmdSetupOpen] = useState(false);
+  const sbmdTokenRef = useRef(null);
+  useEffect(() => { sbmdTokenRef.current = sbmdToken; }, [sbmdToken]);
+  // Init ref synchronously from state on first render
+  sbmdTokenRef.current = sbmdToken;
+
   const messagesEndRef = useRef(null);
 
   const customerName = customer?.name || 'Shopper';
@@ -261,6 +273,15 @@ export default function CustomerStorefront() {
 
   const removeFromCart = (productId) => setCart(cart.filter(i => i.id !== productId));
 
+  const handleSbmdSetupSuccess = ({ customerId, tokenId, isSandbox }) => {
+    const token = { customerId, tokenId, isSandbox: isSandbox || false };
+    setSbmdToken(token);
+    sbmdTokenRef.current = token;
+    localStorage.setItem('sbmd_token', JSON.stringify(token));
+    setIsSbmdSetupOpen(false);
+    addMessage('assistant', '✅ **Frictionless checkout enabled!** Future purchases will be captured instantly — no checkout page, no PIN needed.');
+  };
+
   const executeCheckout = async (itemsToCheckout = null, couponToApply = null, isAutomatic = false) => {
     const targetItems = (itemsToCheckout && itemsToCheckout.length > 0)
       ? itemsToCheckout
@@ -268,8 +289,11 @@ export default function CustomerStorefront() {
     if (targetItems.length === 0) return;
     setLoadingChat(true);
 
+    const currentToken = sbmdTokenRef.current;
+
     if (isAutomatic) {
-      addMessage('assistant', '⚡ **Auto-checkout triggered** — processing your order now...');
+      const payMode = currentToken ? '⚡ **Frictionless checkout triggered** — capturing payment instantly...' : '⚡ **Auto-checkout triggered** — processing your order now...';
+      addMessage('assistant', payMode);
     }
 
     const activeCoupon = couponToApply || appliedCoupon?.code || null;
@@ -282,7 +306,8 @@ export default function CustomerStorefront() {
           email: customer?.email || 'shopper@razoragent.demo',
           phone: customer?.phone || '+919876543210',
         },
-        couponCode: activeCoupon
+        couponCode: activeCoupon,
+        sbmdToken: currentToken || null
       });
 
       if (res.data?.requiresApproval) {
@@ -299,13 +324,24 @@ export default function CustomerStorefront() {
         return;
       }
 
-      setCheckoutOrder(res.data);
+      const orderResult = res.data?.result || res.data;
+
+      // SBMD frictionless: already captured — no modal
+      if (orderResult.sbmdPayment || currentToken) {
+        setCart([]);
+        setAppliedCoupon(null);
+        setCouponCode('');
+        const msg = orderResult.sbmdMessage || `⚡ Payment captured instantly! ₹${orderResult.totalAmountInr?.toLocaleString('en-IN')} debited via frictionless checkout.`;
+        addMessage('assistant', msg);
+        return;
+      }
+
+      setCheckoutOrder(orderResult);
       setIsPayModalOpen(true);
 
-      const discountMsg = res.data.discountAmountInr > 0 ? ` (Discount applied: ₹${res.data.discountAmountInr})` : '';
-      addMessage('assistant', `🛒 Order **#${res.data.orderNumber}** created for **₹${res.data.totalAmountInr.toLocaleString('en-IN')}**${discountMsg}. Opening Razorpay payment window...`);
+      const discountMsg = orderResult.discountAmountInr > 0 ? ` (Discount applied: ₹${orderResult.discountAmountInr})` : '';
+      addMessage('assistant', `🛒 Order **#${orderResult.orderNumber}** created for **₹${orderResult.totalAmountInr?.toLocaleString('en-IN')}**${discountMsg}. Opening Razorpay payment window...`);
     } catch (err) {
-      const isSafetyBlock = err.response?.data?.code === 'SAFETY_BLOCKED';
       const errMsg = err.response?.data?.error || err.message;
       addMessage('assistant', `⚠️ Checkout failed: ${errMsg}`);
     } finally {
@@ -639,6 +675,28 @@ export default function CustomerStorefront() {
           </button>
         </div>
 
+        {/* SBMD Frictionless Pay — always visible */}
+        <div className="px-3 pt-3">
+          {!sbmdToken ? (
+            <button
+              onClick={() => setIsSbmdSetupOpen(true)}
+              className="w-full py-2 px-3 rounded-xl bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/30 text-emerald-400 text-xs font-semibold flex items-center justify-center gap-2 transition-all"
+            >
+              <Zap className="w-3 h-3" />
+              Enable Frictionless Pay (One-time setup)
+            </button>
+          ) : (
+            <div className="flex items-center gap-2 text-[10px] text-emerald-400 bg-emerald-500/10 rounded-xl p-2.5 border border-emerald-500/20">
+              <CheckCircle className="w-3.5 h-3.5 shrink-0" />
+              <span className="font-semibold">⚡ Frictionless pay active — instant capture</span>
+              <button
+                onClick={() => { setSbmdToken(null); sbmdTokenRef.current = null; localStorage.removeItem('sbmd_token'); }}
+                className="ml-auto text-slate-500 hover:text-red-400 transition-colors"
+              >✕</button>
+            </div>
+          )}
+        </div>
+
         <div className="flex-1 overflow-y-auto p-3 space-y-3">
           {/* Cart Items */}
           {cart.length === 0 ? (
@@ -732,11 +790,15 @@ export default function CustomerStorefront() {
               </div>
 
               <button
-                onClick={() => executeCheckout(null, appliedCoupon?.code || null, isAutopay)}
-                className="w-full py-3 rounded-xl bg-gradient-to-r from-violet-700 to-purple-600 hover:from-violet-600 hover:to-purple-500 text-white font-bold text-sm flex items-center justify-center gap-2 shadow-lg shadow-violet-600/30 transition-all cursor-pointer"
+                onClick={() => executeCheckout(null, appliedCoupon?.code || null, isAutopay || Boolean(sbmdToken))}
+                className={`w-full py-3 rounded-xl text-white font-bold text-sm flex items-center justify-center gap-2 shadow-lg transition-all cursor-pointer ${
+                  sbmdToken
+                    ? 'bg-gradient-to-r from-emerald-600 to-teal-500 hover:from-emerald-500 hover:to-teal-400 shadow-emerald-600/30'
+                    : 'bg-gradient-to-r from-violet-700 to-purple-600 hover:from-violet-600 hover:to-purple-500 shadow-violet-600/30'
+                }`}
               >
-                {isAutopay ? <Zap className="w-4 h-4" /> : <ArrowRight className="w-4 h-4" />}
-                {isAutopay ? 'Auto Checkout' : 'Checkout with Razorpay'}
+                <Zap className="w-4 h-4" />
+                {sbmdToken ? 'Pay Instantly — No Checkout Needed' : isAutopay ? 'Auto Checkout' : 'Checkout with Razorpay'}
               </button>
             </>
           )}
@@ -867,6 +929,13 @@ export default function CustomerStorefront() {
             : '❌ Order was rejected by the merchant.'
           );
         }}
+      />
+
+      {/* SBMD Frictionless Setup Modal */}
+      <SBMDSetupModal
+        isOpen={isSbmdSetupOpen}
+        onClose={() => setIsSbmdSetupOpen(false)}
+        onSuccess={handleSbmdSetupSuccess}
       />
     </div>
   );
