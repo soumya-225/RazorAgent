@@ -22,13 +22,18 @@ router.get('/razorpay-config', (req, res) => {
 
 /**
  * GET /api/orders
- * List orders
+ * List orders — filtered by logged-in merchant if authenticated
  */
 router.get('/', optionalMerchantAuth, async (req, res) => {
   try {
     const { status, limit = 50 } = req.query;
     const where = {};
     if (status) where.status = status;
+
+    // Filter by merchantId if merchant is logged in
+    if (req.merchant?.id) {
+      where.merchantId = req.merchant.id;
+    }
 
     const orders = await prisma.order.findMany({
       where,
@@ -51,22 +56,28 @@ router.get('/', optionalMerchantAuth, async (req, res) => {
 
 /**
  * GET /api/orders/metrics/summary
- * Merchant Dashboard Metrics
+ * Merchant Dashboard Metrics — filtered by logged-in merchant
  */
 router.get('/metrics/summary', optionalMerchantAuth, async (req, res) => {
   try {
-    const totalOrders = await prisma.order.count();
+    const merchantFilter = req.merchant?.id ? { merchantId: req.merchant.id } : {};
+
+    const totalOrders = await prisma.order.count({ where: merchantFilter });
     const paidOrders = await prisma.order.findMany({
-      where: { status: 'PAID' }
+      where: { status: 'PAID', ...merchantFilter }
     });
 
     const totalRevenuePaise = paidOrders.reduce((sum, o) => sum + o.totalAmountPaise, 0);
-    const activeCampaigns = await prisma.campaign.count({ where: { status: 'ACTIVE' } });
-    const pendingApprovals = await prisma.approvalRequest.count({ where: { status: 'PENDING' } });
+    const activeCampaigns = await prisma.campaign.count({
+      where: { status: 'ACTIVE', ...(req.merchant?.id ? { merchantId: req.merchant.id } : {}) }
+    });
+    const pendingApprovals = await prisma.approvalRequest.count({
+      where: { status: 'PENDING', ...(req.merchant?.id ? { merchantId: req.merchant.id } : {}) }
+    });
     const auditEventsCount = await prisma.auditLog.count();
 
     const lowStockCount = await prisma.product.count({
-      where: { inventory: { lte: 5 } }
+      where: { inventory: { lte: 5 }, ...(req.merchant?.id ? { merchantId: req.merchant.id } : {}) }
     });
 
     return res.json({

@@ -1,25 +1,95 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  TrendingUp, ShoppingBag, ShieldCheck, Sparkles, Bot, AlertCircle, 
-  ArrowUpRight, RefreshCw, CheckCircle, Clock, ExternalLink, Settings, Save
+import {
+  TrendingUp, ShoppingBag, ShieldCheck, Sparkles, Bot, AlertCircle,
+  ArrowUpRight, RefreshCw, CheckCircle, Clock, ExternalLink, Settings, Save,
+  Package, DollarSign, Activity, Target
 } from 'lucide-react';
 import api from '../api';
 import { useAuth } from '../context/AuthContext';
+
+// Mini sparkline bar chart (CSS only)
+function RevenueChart({ data }) {
+  if (!data || data.length === 0) return null;
+  const max = Math.max(...data.map(d => d.revenueInr), 1);
+
+  return (
+    <div className="flex items-end gap-1 h-16">
+      {data.map((d, i) => {
+        const height = Math.max((d.revenueInr / max) * 100, 2);
+        const isToday = i === data.length - 1;
+        return (
+          <div key={d.date} className="flex-1 flex flex-col items-center gap-1 group relative">
+            <div
+              className={`w-full rounded-t-sm transition-all duration-500 chart-bar ${
+                isToday ? 'bg-blue-500' : 'bg-blue-500/30 group-hover:bg-blue-500/60'
+              }`}
+              style={{ height: `${height}%` }}
+            />
+            {/* Tooltip */}
+            <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 hidden group-hover:flex flex-col items-center z-10 pointer-events-none">
+              <div className="bg-slate-800 border border-slate-700 rounded-lg px-2 py-1 text-[10px] text-white whitespace-nowrap shadow-xl">
+                <div className="font-mono font-bold text-blue-400">₹{d.revenueInr.toLocaleString('en-IN')}</div>
+                <div className="text-slate-400 text-[9px]">{d.date.slice(5)} · {d.orderCount} orders</div>
+              </div>
+              <div className="w-1.5 h-1.5 bg-slate-800 rotate-45 -mt-0.5 border-r border-b border-slate-700" />
+            </div>
+            <div className="text-[9px] text-slate-600">{d.date.slice(5)}</div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function StatCard({ label, value, sub, icon: Icon, color, trend }) {
+  const colorMap = {
+    blue:   { bg: 'bg-blue-500/10',   icon: 'text-blue-400',   val: 'text-white' },
+    emerald:{ bg: 'bg-emerald-500/10',icon: 'text-emerald-400', val: 'text-white' },
+    amber:  { bg: 'bg-amber-500/10',  icon: 'text-amber-400',  val: 'text-white' },
+    purple: { bg: 'bg-purple-500/10', icon: 'text-purple-400', val: 'text-white' },
+    sky:    { bg: 'bg-sky-500/10',    icon: 'text-sky-400',    val: 'text-white' },
+  };
+  const c = colorMap[color] || colorMap.blue;
+
+  return (
+    <div className="stat-card group cursor-default glass-card-hover">
+      <div className="flex items-start justify-between mb-3">
+        <span className="text-[11px] text-slate-400 font-medium">{label}</span>
+        <div className={`p-2 rounded-lg ${c.bg}`}>
+          <Icon className={`w-4 h-4 ${c.icon}`} />
+        </div>
+      </div>
+      <div className={`text-2xl font-extrabold font-mono ${c.val} mb-1`}>{value}</div>
+      <div className="flex items-center gap-1.5">
+        {trend !== undefined && trend > 0 && (
+          <span className="flex items-center gap-0.5 text-[10px] text-emerald-400 font-semibold">
+            <ArrowUpRight className="w-3 h-3" />+{trend}%
+          </span>
+        )}
+        <span className="text-[10px] text-slate-500">{sub}</span>
+      </div>
+    </div>
+  );
+}
 
 export default function Overview({ setActiveTab }) {
   const { merchant, updateSettings } = useAuth();
   const [metrics, setMetrics] = useState(null);
   const [recentOrders, setRecentOrders] = useState([]);
+  const [revenueByDay, setRevenueByDay] = useState([]);
+  const [topProducts, setTopProducts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [savingSettings, setSavingSettings] = useState(false);
 
-  // Settings State
   const [spendingCap, setSpendingCap] = useState(merchant?.spendingCapInr || 10000);
   const [approvalThreshold, setApprovalThreshold] = useState(merchant?.approvalThresholdInr || 5000);
   const [settingsSavedMsg, setSettingsSavedMsg] = useState(false);
 
   useEffect(() => {
     fetchDashboardData();
+    // Auto-refresh every 30 seconds so new customer orders appear without manual refresh
+    const interval = setInterval(fetchDashboardData, 30000);
+    return () => clearInterval(interval);
   }, []);
 
   useEffect(() => {
@@ -38,6 +108,18 @@ export default function Overview({ setActiveTab }) {
       ]);
       setMetrics(metricsRes.data);
       setRecentOrders(ordersRes.data?.orders || []);
+
+      // Try to get marketplace analytics for chart data
+      try {
+        const apiKey = merchant?.apiKey;
+        if (apiKey) {
+          const analyticsRes = await api.get('/api/marketplace/analytics', {
+            headers: { 'X-API-Key': apiKey }
+          });
+          setRevenueByDay(analyticsRes.data?.revenueByDay || []);
+          setTopProducts(analyticsRes.data?.topProducts || []);
+        }
+      } catch { /* analytics may not be available */ }
     } catch (err) {
       console.error('Failed to load dashboard data:', err);
     } finally {
@@ -62,178 +144,243 @@ export default function Overview({ setActiveTab }) {
     }
   };
 
+  const totalRevenue = metrics?.totalRevenueInr || 0;
+  const conversionRate = metrics?.conversionRate || 0;
+
   return (
-    <div className="space-y-6">
-      {/* Top Welcome Banner */}
+    <div className="space-y-6 animate-fade-in-up">
+      {/* Welcome Banner */}
       <div className="p-6 rounded-2xl bg-gradient-to-r from-blue-900/40 via-indigo-900/20 to-slate-900 border border-blue-500/20 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
         <div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 mb-1">
             <span className="text-xs uppercase tracking-widest font-bold text-blue-400">Agentic Commerce Engine</span>
-            <span className="w-1.5 h-1.5 rounded-full bg-blue-400"></span>
+            <span className="w-1.5 h-1.5 rounded-full bg-blue-400" />
             <span className="text-xs text-slate-400">Autonomous Protocol Ready</span>
           </div>
-          <h1 className="text-2xl font-black text-white tracking-tight mt-1">
-            {merchant?.storeName || 'RazorAgent Merchant Hub'}
+          <h1 className="text-2xl font-black text-white tracking-tight">
+            {merchant?.storeName || 'Merchant Dashboard'}
           </h1>
-          <p className="text-xs text-slate-300 mt-1 max-w-2xl">
-            Active revenue agents boosting conversions, inventory clearance orchestrator, and ACP/x402 endpoints enabling autonomous AI buyers with strict safety guardrails.
+          <p className="text-xs text-slate-400 mt-1 max-w-lg">
+            Revenue agents boosting conversions, AI-powered campaign orchestration, and safety-gated autonomous buyers.
           </p>
         </div>
-        <div className="flex items-center gap-2 self-stretch md:self-auto">
+        <div className="flex items-center gap-2">
           <button
             onClick={() => setActiveTab('campaigns')}
-            className="flex-1 md:flex-none flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs shadow-lg shadow-blue-600/30 transition-all"
+            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs shadow-lg shadow-blue-600/30 transition-all"
           >
-            <Sparkles className="w-3.5 h-3.5" />
-            Run AI Campaign
+            <Sparkles className="w-3.5 h-3.5" /> Run AI Campaign
           </button>
           <button
             onClick={() => setActiveTab('buyer')}
-            className="flex-1 md:flex-none flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-semibold text-xs transition-all"
+            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-semibold text-xs transition-all"
           >
-            <Bot className="w-3.5 h-3.5 text-sky-400" />
-            Simulate AI Buyer
+            <Bot className="w-3.5 h-3.5 text-sky-400" /> AI Buyer Sim
+          </button>
+          <button
+            onClick={fetchDashboardData}
+            className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition-colors border border-slate-700"
+          >
+            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
           </button>
         </div>
       </div>
 
-      {/* Metrics Row */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="p-4 rounded-2xl glass-card glass-card-hover space-y-2">
+      {/* KPI Stat Cards */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <StatCard
+          label="Total Revenue (Paid)"
+          value={`₹${totalRevenue.toLocaleString('en-IN')}`}
+          sub="Razorpay captured"
+          icon={DollarSign}
+          color="emerald"
+        />
+        <StatCard
+          label="Total Orders"
+          value={metrics?.totalOrders || 0}
+          sub={`${metrics?.paidOrdersCount || 0} paid orders`}
+          icon={ShoppingBag}
+          color="blue"
+        />
+        <StatCard
+          label="Conversion Rate"
+          value={`${conversionRate}%`}
+          sub="Created → Paid"
+          icon={Activity}
+          color="sky"
+          trend={conversionRate > 50 ? Math.round(conversionRate - 50) : undefined}
+        />
+        <StatCard
+          label="Active Campaigns"
+          value={metrics?.activeCampaigns || 0}
+          sub="Revenue campaigns live"
+          icon={Target}
+          color="amber"
+        />
+      </div>
+
+      {/* Revenue Chart + Safety Settings row */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+
+        {/* Revenue Chart */}
+        <div className="lg:col-span-2 glass-card rounded-2xl p-5 space-y-4">
           <div className="flex items-center justify-between">
-            <span className="text-xs text-slate-400 font-medium">Total Paid Revenue</span>
-            <div className="p-2 rounded-lg bg-emerald-500/10 text-emerald-400">
-              <TrendingUp className="w-4 h-4" />
+            <div>
+              <h2 className="text-sm font-bold text-white">Revenue — Last 7 Days</h2>
+              <p className="text-[11px] text-slate-400">Daily revenue from paid orders</p>
+            </div>
+            <div className="text-right">
+              <div className="text-xs font-mono font-bold text-blue-400">
+                ₹{(revenueByDay.reduce((s, d) => s + d.revenueInr, 0)).toLocaleString('en-IN')}
+              </div>
+              <div className="text-[10px] text-slate-500">7-day total</div>
             </div>
           </div>
-          <div className="text-2xl font-bold text-white font-mono">
-            ₹{metrics ? metrics.totalRevenueInr.toLocaleString('en-IN') : '0.00'}
-          </div>
-          <div className="text-[11px] text-emerald-400 flex items-center gap-1 font-medium">
-            <CheckCircle className="w-3 h-3" /> Razorpay Test Captured
+
+          {revenueByDay.length > 0 ? (
+            <RevenueChart data={revenueByDay} />
+          ) : (
+            <div className="h-16 flex items-center justify-center">
+              <div className="flex items-end gap-1 h-14 opacity-25">
+                {[30, 60, 45, 80, 55, 90, 70].map((h, i) => (
+                  <div key={i} className="flex-1 bg-blue-500/40 rounded-t-sm" style={{ height: `${h}%` }} />
+                ))}
+              </div>
+              <p className="absolute text-xs text-slate-500">No revenue data yet — start making sales!</p>
+            </div>
+          )}
+
+          {/* Avg Order Value metric */}
+          <div className="grid grid-cols-3 gap-3 pt-3 border-t border-slate-800">
+            <div>
+              <div className="text-[10px] text-slate-500">Avg Order Value</div>
+              <div className="text-sm font-mono font-bold text-white">
+                ₹{metrics?.paidOrdersCount > 0
+                  ? Math.round(totalRevenue / metrics.paidOrdersCount).toLocaleString('en-IN')
+                  : '0'}
+              </div>
+            </div>
+            <div>
+              <div className="text-[10px] text-slate-500">Audit Events</div>
+              <div className="text-sm font-mono font-bold text-white">{metrics?.auditEventsCount || 0}</div>
+            </div>
+            <div>
+              <div className="text-[10px] text-slate-500">Pending Approvals</div>
+              <div className={`text-sm font-mono font-bold ${metrics?.pendingApprovals > 0 ? 'text-amber-400' : 'text-white'}`}>
+                {metrics?.pendingApprovals || 0}
+              </div>
+            </div>
           </div>
         </div>
 
-        <div className="p-4 rounded-2xl glass-card glass-card-hover space-y-2">
-          <div className="flex items-center justify-between">
-            <span className="text-xs text-slate-400 font-medium">Processed Orders</span>
-            <div className="p-2 rounded-lg bg-blue-500/10 text-blue-400">
-              <ShoppingBag className="w-4 h-4" />
+        {/* Safety Guardrails */}
+        <div className="glass-card rounded-2xl p-5 space-y-4">
+          <div className="flex items-center gap-2">
+            <ShieldCheck className="w-5 h-5 text-blue-400" />
+            <div>
+              <h2 className="text-sm font-bold text-white">Safety Gating Kernel</h2>
+              <p className="text-[11px] text-slate-400">Configure boundaries & human gates</p>
             </div>
           </div>
-          <div className="text-2xl font-bold text-white font-mono">
-            {metrics?.totalOrders || 0} <span className="text-xs text-slate-500 font-normal">({metrics?.paidOrdersCount || 0} Paid)</span>
-          </div>
-          <div className="text-[11px] text-slate-400">
-            Conversion rate: <span className="text-white font-semibold">{metrics?.conversionRate || 0}%</span>
-          </div>
-        </div>
 
-        <div className="p-4 rounded-2xl glass-card glass-card-hover space-y-2">
-          <div className="flex items-center justify-between">
-            <span className="text-xs text-slate-400 font-medium">Active AI Campaigns</span>
-            <div className="p-2 rounded-lg bg-amber-500/10 text-amber-400">
-              <Sparkles className="w-4 h-4" />
+          <form onSubmit={handleSaveSafetySettings} className="space-y-3.5 text-xs">
+            <div>
+              <label className="text-slate-300 font-medium block mb-1">Session Spending Cap (₹)</label>
+              <input
+                type="number" value={spendingCap} onChange={e => setSpendingCap(e.target.value)}
+                className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white font-mono focus:outline-none focus:border-blue-500"
+              />
+              <span className="text-[10px] text-slate-500 mt-1 block">Hard block when agent spending exceeds this.</span>
             </div>
-          </div>
-          <div className="text-2xl font-bold text-white font-mono">
-            {metrics?.activeCampaigns || 0}
-          </div>
-          <div className="text-[11px] text-amber-400 flex items-center gap-1">
-            <TrendingUp className="w-3 h-3" /> Generating dynamic links
-          </div>
-        </div>
-
-        <div className="p-4 rounded-2xl glass-card glass-card-hover space-y-2">
-          <div className="flex items-center justify-between">
-            <span className="text-xs text-slate-400 font-medium">Safety Audit Events</span>
-            <div className="p-2 rounded-lg bg-purple-500/10 text-purple-400">
-              <ShieldCheck className="w-4 h-4" />
+            <div>
+              <label className="text-slate-300 font-medium block mb-1">High-Value Approval Gate (₹)</label>
+              <input
+                type="number" value={approvalThreshold} onChange={e => setApprovalThreshold(e.target.value)}
+                className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white font-mono focus:outline-none focus:border-blue-500"
+              />
+              <span className="text-[10px] text-slate-500 mt-1 block">Requires human sign-off above this amount.</span>
             </div>
-          </div>
-          <div className="text-2xl font-bold text-white font-mono">
-            {metrics?.auditEventsCount || 0}
-          </div>
-          <div className="text-[11px] text-purple-300">
-            {metrics?.pendingApprovals > 0 ? (
-              <span className="text-amber-400 font-semibold">{metrics.pendingApprovals} pending human approval</span>
-            ) : (
-              '100% money actions bounded'
+            <button type="submit" disabled={savingSettings}
+              className="w-full py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-semibold flex items-center justify-center gap-2 shadow-lg shadow-blue-600/30 transition-all disabled:opacity-50 cursor-pointer">
+              <Save className="w-3.5 h-3.5" />
+              {savingSettings ? 'Saving...' : 'Update Safety Limits'}
+            </button>
+            {settingsSavedMsg && (
+              <div className="p-2 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-center text-[11px] font-medium animate-fade-in">
+                ✓ Safety limits updated and live!
+              </div>
             )}
+          </form>
+
+          {/* Live Endpoints */}
+          <div className="pt-3 border-t border-slate-800 text-[11px] space-y-1.5">
+            <div className="font-semibold text-slate-300">Machine-Readable Endpoints:</div>
+            {[
+              { path: '/.well-known/agent.json', label: 'ACP Card' },
+              { path: '/api/catalog',            label: 'JSON-LD' },
+              { path: '/api/marketplace/info',   label: 'Marketplace API' },
+            ].map(ep => (
+              <div key={ep.path} className="flex items-center justify-between p-2 rounded-lg bg-slate-900 font-mono text-[10px] text-slate-400">
+                <span className="truncate">{ep.path}</span>
+                <a href={ep.path} target="_blank" rel="noreferrer" className="text-blue-400 hover:underline flex items-center gap-1 shrink-0 ml-2">
+                  {ep.label} <ExternalLink className="w-2.5 h-2.5" />
+                </a>
+              </div>
+            ))}
           </div>
         </div>
       </div>
 
-      {/* Main Grid: Orders & Safety Limits */}
+      {/* Recent Orders + Top Products */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        
-        {/* Recent Orders Stream */}
-        <div className="lg:col-span-2 p-5 rounded-2xl glass-card space-y-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <h2 className="text-sm font-bold text-white">Recent Agent & Shopper Transactions</h2>
-              <p className="text-[11px] text-slate-400">Real-time incoming orders via Storefront and x402 AI buyers</p>
-            </div>
-            <button
-              onClick={fetchDashboardData}
-              className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
-            >
-              <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
-            </button>
-          </div>
 
+        {/* Recent Orders */}
+        <div className="lg:col-span-2 glass-card rounded-2xl p-5 space-y-4">
+          <h2 className="text-sm font-bold text-white">Recent Transactions</h2>
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs">
               <thead>
-                <tr className="border-b border-slate-800 text-slate-500 font-semibold uppercase tracking-wider">
+                <tr className="border-b border-slate-800 text-slate-500 text-[11px] uppercase tracking-wider">
                   <th className="pb-2.5">Order #</th>
-                  <th className="pb-2.5">Customer / Agent</th>
+                  <th className="pb-2.5">Customer</th>
                   <th className="pb-2.5">Amount</th>
                   <th className="pb-2.5">Status</th>
-                  <th className="pb-2.5 text-right">Created</th>
+                  <th className="pb-2.5 text-right">Time</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800/60">
                 {recentOrders.length === 0 ? (
                   <tr>
-                    <td colSpan="5" className="py-6 text-center text-slate-500">
-                      No orders recorded yet. Launch the AI Buyer or open Storefront to generate orders.
+                    <td colSpan="5" className="py-8 text-center text-slate-500">
+                      No orders yet. Open the storefront or simulate an AI buyer.
                     </td>
                   </tr>
                 ) : (
-                  recentOrders.map((order) => {
+                  recentOrders.map(order => {
                     const isPaid = order.status === 'PAID';
                     const isTimedOut = order.status === 'TIMED_OUT';
                     return (
                       <tr key={order.id} className="hover:bg-slate-800/30 transition-colors">
-                        <td className="py-3 font-mono text-white font-medium">
-                          #{order.orderNumber}
-                        </td>
-                        <td className="py-3 text-slate-300">
+                        <td className="py-3 font-mono text-white font-medium">#{order.orderNumber}</td>
+                        <td className="py-3 text-slate-300 max-w-[120px] truncate">
                           {order.customerName || 'Shopper'}
                           {order.metadata?.protocol === 'x402' && (
-                            <span className="ml-1.5 px-1.5 py-0.5 rounded text-[9px] bg-blue-500/20 text-blue-300 font-mono">
-                              x402 AI
-                            </span>
+                            <span className="ml-1 px-1.5 py-0.5 rounded text-[9px] bg-blue-500/20 text-blue-300 font-mono">x402</span>
                           )}
                         </td>
                         <td className="py-3 font-mono font-semibold text-white">
-                          ₹{order.totalAmountInr.toLocaleString('en-IN')}
+                          ₹{order.totalAmountInr?.toLocaleString('en-IN')}
                         </td>
                         <td className="py-3">
-                          <span
-                            className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${
-                              isPaid
-                                ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
-                                : isTimedOut
-                                ? 'bg-red-500/10 text-red-400 border border-red-500/20'
-                                : 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
-                            }`}
-                          >
+                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold border ${
+                            isPaid       ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+                            : isTimedOut ? 'bg-red-500/10 text-red-400 border-red-500/20'
+                                         : 'bg-amber-500/10 text-amber-400 border-amber-500/20'
+                          }`}>
                             {order.status}
                           </span>
                         </td>
-                        <td className="py-3 text-right text-slate-500 font-mono text-[11px]">
+                        <td className="py-3 text-right text-slate-500 font-mono text-[10px]">
                           {new Date(order.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                         </td>
                       </tr>
@@ -245,79 +392,38 @@ export default function Overview({ setActiveTab }) {
           </div>
         </div>
 
-        {/* Safety Guardrails Configuration */}
-        <div className="p-5 rounded-2xl glass-card space-y-4">
+        {/* Top Products */}
+        <div className="glass-card rounded-2xl p-5 space-y-4">
           <div className="flex items-center gap-2">
-            <ShieldCheck className="w-5 h-5 text-blue-400" />
-            <div>
-              <h2 className="text-sm font-bold text-white">Safety Gating Kernel</h2>
-              <p className="text-[11px] text-slate-400">Configure boundaries & human gates</p>
-            </div>
+            <Package className="w-4 h-4 text-slate-400" />
+            <h2 className="text-sm font-bold text-white">Top Products</h2>
           </div>
-
-          <form onSubmit={handleSaveSafetySettings} className="space-y-3.5 text-xs">
-            <div>
-              <label className="text-slate-300 font-medium block mb-1">
-                Session Spending Cap (₹)
-              </label>
-              <input
-                type="number"
-                value={spendingCap}
-                onChange={(e) => setSpendingCap(e.target.value)}
-                className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white font-mono focus:outline-none focus:border-blue-500"
-              />
-              <span className="text-[10px] text-slate-500 mt-1 block">
-                Hard block when total agent transaction exceeds this budget.
-              </span>
+          {topProducts.length === 0 ? (
+            <div className="py-8 text-center text-xs text-slate-500">
+              Revenue data will appear here after your first paid orders.
             </div>
-
-            <div>
-              <label className="text-slate-300 font-medium block mb-1">
-                High-Value Approval Gate (₹)
-              </label>
-              <input
-                type="number"
-                value={approvalThreshold}
-                onChange={(e) => setApprovalThreshold(e.target.value)}
-                className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white font-mono focus:outline-none focus:border-blue-500"
-              />
-              <span className="text-[10px] text-slate-500 mt-1 block">
-                Transactions above this amount require human operator sign-off.
-              </span>
+          ) : (
+            <div className="space-y-2.5">
+              {topProducts.map((p, i) => (
+                <div key={p.sku} className="flex items-center gap-3">
+                  <div className={`w-6 h-6 rounded-lg flex items-center justify-center text-[10px] font-bold shrink-0 ${
+                    i === 0 ? 'bg-amber-500/20 text-amber-400' :
+                    i === 1 ? 'bg-slate-500/20 text-slate-300' :
+                              'bg-slate-800 text-slate-500'
+                  }`}>
+                    {i + 1}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-xs font-medium text-white truncate">{p.name}</div>
+                    <div className="text-[10px] text-slate-500">{p.qty} units sold</div>
+                  </div>
+                  <div className="text-xs font-mono font-bold text-emerald-400 shrink-0">
+                    ₹{p.revenueInr.toLocaleString('en-IN')}
+                  </div>
+                </div>
+              ))}
             </div>
-
-            <button
-              type="submit"
-              disabled={savingSettings}
-              className="w-full py-2.5 px-4 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-semibold flex items-center justify-center gap-2 shadow-lg shadow-blue-600/30 transition-all disabled:opacity-50 cursor-pointer"
-            >
-              <Save className="w-3.5 h-3.5" />
-              {savingSettings ? 'Saving...' : 'Update Safety Boundaries'}
-            </button>
-
-            {settingsSavedMsg && (
-              <div className="p-2 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-center text-[11px] font-medium animate-in fade-in">
-                ✓ Safety limits updated and live!
-              </div>
-            )}
-          </form>
-
-          {/* Protocol Endpoint Discovery card */}
-          <div className="pt-3 border-t border-slate-800 text-[11px] space-y-1.5">
-            <div className="font-semibold text-slate-300">Live Machine-Readable Endpoints:</div>
-            <div className="flex items-center justify-between p-2 rounded-lg bg-slate-900 font-mono text-[10px] text-slate-400">
-              <span>/.well-known/agent.json</span>
-              <a href="/.well-known/agent.json" target="_blank" className="text-blue-400 hover:underline flex items-center gap-1">
-                ACP <ExternalLink className="w-2.5 h-2.5" />
-              </a>
-            </div>
-            <div className="flex items-center justify-between p-2 rounded-lg bg-slate-900 font-mono text-[10px] text-slate-400">
-              <span>/api/catalog</span>
-              <a href="/api/catalog" target="_blank" className="text-blue-400 hover:underline flex items-center gap-1">
-                JSON-LD <ExternalLink className="w-2.5 h-2.5" />
-              </a>
-            </div>
-          </div>
+          )}
         </div>
       </div>
     </div>

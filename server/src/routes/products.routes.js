@@ -13,6 +13,11 @@ router.get('/', optionalMerchantAuth, async (req, res) => {
     const { category, inStock, search } = req.query;
     const where = {};
 
+    // Filter by merchant when logged in (merchant sees their own products only)
+    if (req.merchant?.id) {
+      where.merchantId = req.merchant.id;
+    }
+
     if (category) {
       where.category = { contains: category, mode: 'insensitive' };
     }

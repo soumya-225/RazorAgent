@@ -83,23 +83,31 @@ export class CheckoutAgent {
       throw new Error('Cannot create order with an empty cart');
     }
 
-    // Resolve items from DB to verify stock & prices
+    // Resolve items from DB — always use DB price, never trust client-supplied price
     let computedTotalPaise = 0;
     const orderItems = [];
 
     for (const item of items) {
-      const product = await prisma.product.findFirst({
-        where: {
-          OR: [{ id: item.productId || '' }, { sku: item.sku || '' }, { name: { contains: item.name || '', mode: 'insensitive' } }]
-        }
-      });
+      // Build OR conditions only from non-empty values.
+      // IMPORTANT: { name: { contains: '' } } matches EVERY row in Prisma/SQLite,
+      // which is why we must never include it when name is absent.
+      const orConditions = [];
+      if (item.productId) orConditions.push({ id: item.productId });
+      if (item.sku)       orConditions.push({ sku: item.sku });
+      if (item.name)      orConditions.push({ name: { contains: item.name, mode: 'insensitive' } });
+
+      if (orConditions.length === 0) {
+        throw new Error('Each item must have at least a productId, sku, or name.');
+      }
+
+      const product = await prisma.product.findFirst({ where: { OR: orConditions } });
 
       if (!product) {
         throw new Error(`Product not found: ${item.productId || item.sku || item.name}`);
       }
 
       if (product.inventory < (item.qty || 1)) {
-        throw new Error(`Insufficient stock for product ${product.name}. Available: ${product.inventory}`);
+        throw new Error(`Insufficient stock for "${product.name}". Available: ${product.inventory}`);
       }
 
       const qty = item.qty || 1;
@@ -108,12 +116,21 @@ export class CheckoutAgent {
 
       orderItems.push({
         productId: product.id,
+        merchantId: product.merchantId,  // track per-item merchant for multi-tenant attribution
         sku: product.sku,
         name: product.name,
         qty,
         pricePaise: product.pricePaise,
         priceInr: product.pricePaise / 100
       });
+    }
+
+    // Auto-assign merchantId from the first product when this is a customer checkout
+    // (no merchant JWT present). This ensures orders always appear in the correct
+    // merchant's dashboard rather than being lost as null-merchant orphans.
+    let resolvedMerchantId = merchantId;
+    if (!resolvedMerchantId && orderItems.length > 0) {
+      resolvedMerchantId = orderItems[0].merchantId || null;
     }
 
     // Apply coupon if provided
@@ -132,15 +149,20 @@ export class CheckoutAgent {
     const finalAmountPaise = Math.max(100, computedTotalPaise - discountPaise); // Minimum ₹1
     const orderNumber = `ORD-${Date.now().toString().slice(-6)}-${Math.floor(Math.random() * 900 + 100)}`;
 
-    // Safety Interceptor handles spending caps and audit trails
+    // Safety Interceptor handles spending caps and audit trails.
+    // isCustomerCheckout = true bypasses the AI-agent spending cap and approval gate —
+    // those guards are designed for autonomous buyers, not human shoppers.
+    const isCustomerCheckout = !merchantId; // original merchantId was null → came from customer storefront
     const intercepted = await safetyService.interceptAction({
-      merchantId,
+      merchantId: resolvedMerchantId,
       sessionId,
       agentName: this.name,
       actionType: 'create_order',
       amountPaise: finalAmountPaise,
+      isCustomerCheckout,
       explanation: `${explanation}. Order #${orderNumber} with ${orderItems.length} items totaling ₹${(finalAmountPaise / 100).toFixed(2)}.`,
       payload: { orderNumber, items: orderItems, customer, couponCode, finalAmountPaise },
+
       executeFn: async () => {
         // 1. Create Razorpay order
         const rzpOrder = await razorpayService.createOrder({
@@ -163,12 +185,12 @@ export class CheckoutAgent {
           notes: { orderNumber, rzpOrderId: rzpOrder.id }
         });
 
-        // 3. Persist Order in DB
+        // 3. Persist Order in DB with resolved merchantId
         const savedOrder = await prisma.order.create({
           data: {
             orderNumber,
             razorpayOrderId: rzpOrder.id,
-            merchantId,
+            merchantId: resolvedMerchantId,   // ← always attributed to correct merchant
             customerName: customer.name || 'Shopper',
             customerEmail: customer.email || 'customer@example.com',
             customerPhone: customer.phone || '+919876543210',
@@ -206,39 +228,50 @@ export class CheckoutAgent {
     return intercepted;
   }
 
+
   /**
    * Process incoming user chat message in conversational checkout
    */
   async processUserMessage({ merchantId, sessionId, userMessage, conversationHistory = [], cart = [] }) {
     const merchants = await merchantRegistryService.getAllMerchants();
-    const products = await prisma.product.findMany({ where: { inStock: true }, take: 15 });
+    const products = await prisma.product.findMany({ where: { inStock: true }, take: 20 });
 
     const merchantRegistryBrief = merchants.map(m =>
       `- Store: "${m.storeName}" (${m.name}) | Categories: ${m.categories.join(', ')} | Active Promo: ${m.activeCoupon ? `${m.activeCoupon} (${m.discountPercent}% OFF)` : 'None'}`
     ).join('\n');
 
+    // Include full product details so the LLM never has to guess prices/names
     const productCatalogBrief = products.map(p =>
-      `${p.name} (SKU: ${p.sku}, Price: ₹${p.pricePaise / 100}, Category: ${p.category})`
+      `• ${p.name} | SKU: ${p.sku} | Price: ₹${p.pricePaise / 100} | Category: ${p.category} | Stock: ${p.inventory}`
     ).join('\n');
 
-    const systemPrompt = `You are RazorAgent's Conversational Checkout & Network Registry Agent.
-Merchant Network Registry (4 Active Merchants):
-${merchantRegistryBrief}
+    const systemPrompt = `You are RazorAgent's Conversational Shopping Agent for a marketplace.
 
-Active Product Catalog:
+=== CRITICAL RULES (NEVER VIOLATE) ===
+1. You MUST only recommend products that exist EXACTLY in the catalog below. Never invent, hallucinate, or suggest products not listed.
+2. When recommending products, always use the EXACT name, SKU, and price from the catalog. Never state a different price.
+3. If a user asks for a product type not in catalog, tell them honestly and suggest the closest available alternative from the list.
+4. NEVER mention brand names like "Dell", "Apple", "Sony" etc. unless they appear verbatim in the catalog below.
+
+=== CATALOG (Only recommend from this list) ===
 ${productCatalogBrief}
 
-Your role:
-1. Help users discover products across all registered merchants in the network.
-2. If the user asks about merchants, store deals, or price comparisons, guide them using the Merchant Registry info.
-3. If the user wants to buy or order items, confirm the items and specify their details.
-4. If the user asks for a discount or enters a coupon code (e.g., WELCOME10, VOLT20, NEXUS15, DESK10), acknowledge it.
-5. Keep replies friendly, concise, and helpful.
+=== MERCHANT NETWORK ===
+${merchantRegistryBrief}
 
-If the user clearly intends to purchase items, output a JSON action block at the very end formatted as:
-ACTION: {"intent": "CHECKOUT", "items": [{"sku": "SKU_CODE", "qty": 1}], "coupon": "OPTIONAL_CODE"}
-If user is searching or inquiring:
-ACTION: {"intent": "INFO", "recommendedSkus": ["SKU_1"]}
+=== YOUR BEHAVIOR ===
+- Be friendly, concise, and helpful.
+- When a user asks to see products or recommendations, mention them briefly in text and always include the ACTION block so the UI renders product cards.
+- For budget queries (e.g. "under ₹X"), filter from the catalog above and only show products whose Price is ≤ the requested amount.
+- If the user wants to buy, confirm with exact catalog price and proceed to CHECKOUT action.
+- For coupon codes (WELCOME10, VOLT20, NEXUS15, DESK10), acknowledge and include in checkout action.
+
+=== ACTION FORMAT (always append at end of reply) ===
+For purchases:
+ACTION: {"intent": "CHECKOUT", "items": [{"sku": "EXACT_SKU_FROM_CATALOG", "qty": 1}], "coupon": null}
+
+For product suggestions/recommendations (always include even for INFO):
+ACTION: {"intent": "INFO", "recommendedSkus": ["SKU1", "SKU2"]}
 `;
 
     const llmRes = await callLLM({
