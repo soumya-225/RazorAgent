@@ -128,18 +128,27 @@ router.post('/campaign/analyze', optionalMerchantAuth, async (req, res) => {
  */
 router.post('/campaign/run', optionalMerchantAuth, async (req, res) => {
   try {
-    const { campaignType = 'INVENTORY_CLEARANCE', discountPercent = 20, customName } = req.body;
+    const {
+      campaignType = 'INVENTORY_CLEARANCE',
+      discountPercent = 20,
+      customName,
+      selectedSkus = []  // merchant-selected product SKUs from the UI
+    } = req.body;
     const merchantId = req.merchant?.id || null;
 
     const result = await campaignAgent.runCampaign({
       merchantId,
       campaignType,
       discountPercent: Number(discountPercent),
-      customName
+      customName,
+      selectedSkus
     });
 
     return res.json(result);
   } catch (err) {
+    if (err.name === 'SafetyError') {
+      return res.status(403).json({ error: err.message, code: err.code, details: err.details });
+    }
     return res.status(500).json({ error: err.message });
   }
 });

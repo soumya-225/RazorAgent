@@ -50,10 +50,27 @@ export class CampaignAgent {
     sessionId = 'session_campaign',
     campaignType = 'INVENTORY_CLEARANCE',
     discountPercent = 20,
-    customName = null
+    customName = null,
+    selectedSkus = []   // optional: merchant-selected product SKUs from the UI
   }) {
     const analysis = await this.analyzeOpportunities(merchantId);
-    const targetProducts = analysis.slowMoving.length > 0 ? analysis.slowMoving.slice(0, 3) : analysis.highMargin.slice(0, 3);
+
+    // If merchant explicitly selected SKUs, use those; otherwise fall back to AI-picked targets
+    let targetProducts;
+    if (selectedSkus && selectedSkus.length > 0) {
+      const allCandidates = [...analysis.slowMoving, ...analysis.highMargin];
+      targetProducts = allCandidates.filter(p => selectedSkus.includes(p.sku));
+      // Fall back to all scored products if none of the selected SKUs matched scored pools
+      if (targetProducts.length === 0) {
+        targetProducts = await prisma.product.findMany({
+          where: { merchantId, sku: { in: selectedSkus } }
+        });
+      }
+    } else {
+      targetProducts = analysis.slowMoving.length > 0
+        ? analysis.slowMoving.slice(0, 3)
+        : analysis.highMargin.slice(0, 3);
+    }
 
     if (targetProducts.length === 0) {
       throw new Error('No qualifying products found for campaign generation.');
@@ -108,6 +125,9 @@ Output JSON:
       agentName: this.name,
       actionType: 'create_growth_campaign',
       amountPaise: discountedPricePaise,
+      // A campaign creates a payment link that CUSTOMERS pay — it is revenue for the merchant,
+      // not an expense. The spending cap gate must not block campaign creation.
+      isCustomerCheckout: true,
       explanation: reasoning,
       payload: {
         campaignName,
