@@ -1,5 +1,6 @@
 import prisma from '../config/db.js';
 import { callLLM } from '../agents/llmClient.js';
+import { getProductActiveCampaign } from '../utils/campaignUtils.js';
 
 export class MerchantRegistryService {
   /**
@@ -12,6 +13,7 @@ export class MerchantRegistryService {
           where: { inStock: true },
           select: {
             id: true,
+            merchantId: true,
             sku: true,
             name: true,
             pricePaise: true,
@@ -24,10 +26,12 @@ export class MerchantRegistryService {
           where: { status: 'ACTIVE' },
           select: {
             id: true,
+            merchantId: true,
             name: true,
             couponCode: true,
             discountPercent: true,
-            type: true
+            type: true,
+            targetSkus: true
           }
         }
       },
@@ -51,11 +55,17 @@ export class MerchantRegistryService {
         discountPercent,
         spendingCapInr: m.spendingCapPaise / 100,
         approvalThresholdInr: m.approvalThresholdPaise / 100,
-        products: m.products.map(p => ({
-          ...p,
-          priceInr: p.pricePaise / 100,
-          effectivePriceInr: Math.round((p.pricePaise * (100 - discountPercent)) / 100) / 100
-        })),
+        products: m.products.map(p => {
+          const activeDiscount = getProductActiveCampaign(p, m.campaigns);
+          const priceInr = p.pricePaise / 100;
+          return {
+            ...p,
+            priceInr,
+            effectivePriceInr: activeDiscount ? activeDiscount.discountedPriceInr : priceInr,
+            activeCoupon: activeDiscount?.couponCode || null,
+            discountPercent: activeDiscount?.discountPercent || 0
+          };
+        }),
         campaigns: m.campaigns
       };
     });
@@ -84,8 +94,8 @@ export class MerchantRegistryService {
             merchantId: merchant.id,
             storeName: merchant.storeName,
             merchantName: merchant.name,
-            couponCode: merchant.activeCoupon,
-            discountPercent: merchant.discountPercent,
+            couponCode: product.activeCoupon || merchant.activeCoupon,
+            discountPercent: product.discountPercent || merchant.discountPercent,
             product: {
               id: product.id,
               sku: product.sku,

@@ -74,20 +74,63 @@ router.get('/catalog', async (req, res) => {
       ];
     }
 
-    const products = await prisma.product.findMany({
-      where,
-      take: Math.min(Number(limit), 100),
-      orderBy: { salesCount30Days: 'desc' },
-      include: { merchant: { select: { storeName: true } } }
-    });
+    const [products, activeCampaigns] = await Promise.all([
+      prisma.product.findMany({
+        where,
+        take: Math.min(Number(limit), 100),
+        orderBy: { salesCount30Days: 'desc' },
+        include: { merchant: { select: { storeName: true } } }
+      }),
+      prisma.campaign.findMany({
+        where: { status: 'ACTIVE' },
+        orderBy: { createdAt: 'desc' }
+      })
+    ]);
 
     const enriched = products.map(p => {
       const marginPercent = p.pricePaise > 0
         ? Math.round(((p.pricePaise - p.costPaise) / p.pricePaise) * 100)
         : 0;
+
+      // Check if product is targeted by an active promotional campaign
+      let activeDiscount = null;
+      for (const camp of activeCampaigns) {
+        if (camp.merchantId && p.merchantId && camp.merchantId !== p.merchantId) continue;
+        let targetedSkus = [];
+        if (Array.isArray(camp.targetSkus)) {
+          targetedSkus = camp.targetSkus.map(t => typeof t === 'string' ? t.toUpperCase() : (t.sku || t.id || '').toUpperCase()).filter(Boolean);
+        } else if (typeof camp.targetSkus === 'string') {
+          try {
+            const parsed = JSON.parse(camp.targetSkus);
+            targetedSkus = Array.isArray(parsed) ? parsed.map(t => typeof t === 'string' ? t.toUpperCase() : (t.sku || t.id || '').toUpperCase()).filter(Boolean) : [camp.targetSkus.toUpperCase()];
+          } catch {
+            targetedSkus = [camp.targetSkus.toUpperCase()];
+          }
+        }
+
+        const isTargeted = targetedSkus.length === 0 ||
+          targetedSkus.includes((p.sku || '').toUpperCase()) ||
+          targetedSkus.includes((p.id || '').toUpperCase());
+
+        if (isTargeted) {
+          const originalInr = p.pricePaise / 100;
+          const discountedInr = Math.round((originalInr * (100 - camp.discountPercent))) / 100;
+          activeDiscount = {
+            campaignId: camp.id,
+            campaignName: camp.name,
+            couponCode: camp.couponCode,
+            discountPercent: camp.discountPercent,
+            discountedPriceInr: discountedInr,
+            savingsInr: Math.round((originalInr - discountedInr) * 100) / 100
+          };
+          break;
+        }
+      }
+
       return {
         id: p.id,
         sku: p.sku,
+        merchantId: p.merchantId,
         name: p.name,
         description: p.description,
         category: p.category,
@@ -97,9 +140,11 @@ router.get('/catalog', async (req, res) => {
         inStock: p.inStock,
         salesCount30Days: p.salesCount30Days,
         marginPercent,
+        activeCampaign: activeDiscount,
         imageUrl: p.imageUrl || null,
         merchant: p.merchant?.storeName || 'RazorAgent Store',
         badges: [
+          ...(activeDiscount ? ['promo-deal'] : []),
           ...(p.salesCount30Days > 20 ? ['bestseller'] : []),
           ...(marginPercent >= 40 ? ['high-margin'] : []),
           ...(p.inventory < 10 ? ['low-stock'] : [])
@@ -109,6 +154,13 @@ router.get('/catalog', async (req, res) => {
 
     return res.json({
       catalog: enriched,
+      activeCampaigns: activeCampaigns.map(c => ({
+        id: c.id,
+        name: c.name,
+        couponCode: c.couponCode,
+        discountPercent: c.discountPercent,
+        type: c.type
+      })),
       count: enriched.length,
       generatedAt: new Date().toISOString()
     });

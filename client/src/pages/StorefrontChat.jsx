@@ -247,6 +247,26 @@ export default function StorefrontChat() {
     }
   };
 
+  const extractSkusList = (targetSkus) => {
+    if (!targetSkus) return [];
+    if (Array.isArray(targetSkus)) {
+      return targetSkus.map(item => {
+        if (typeof item === 'string') return item.toUpperCase();
+        if (item && typeof item === 'object') return (item.sku || item.id || '').toUpperCase();
+        return '';
+      }).filter(Boolean);
+    }
+    if (typeof targetSkus === 'string') {
+      try {
+        const parsed = JSON.parse(targetSkus);
+        return extractSkusList(parsed);
+      } catch {
+        return [targetSkus.toUpperCase()];
+      }
+    }
+    return [];
+  };
+
   const handleApplyCoupon = async (codeToApply) => {
     const code = (codeToApply || couponCode).trim().toUpperCase();
     if (!code) return;
@@ -254,14 +274,16 @@ export default function StorefrontChat() {
     try {
       // Use the dedicated coupon validation endpoint — does NOT create any Razorpay order
       const res = await api.get(`/api/products/coupon/${encodeURIComponent(code)}`);
+      const targetSkus = extractSkusList(res.data.targetSkus);
       setAppliedCoupon({
         code: res.data.code,
-        discountPercent: res.data.discountPercent
+        discountPercent: res.data.discountPercent,
+        targetSkus
       });
       setCouponCode(res.data.code);
     } catch (err) {
-      // Coupon invalid or network error — store optimistically with 10% default
-      setAppliedCoupon({ code, discountPercent: 10 });
+      // Coupon invalid or expired — clear applied coupon
+      setAppliedCoupon(null);
     }
   };
 
@@ -280,7 +302,18 @@ export default function StorefrontChat() {
   };
 
   const rawCartTotalInr = cart.reduce((sum, i) => sum + i.priceInr * i.qty, 0);
-  const discountAmountInr = appliedCoupon ? (rawCartTotalInr * (appliedCoupon.discountPercent / 100)) : 0;
+  let discountAmountInr = 0;
+  if (appliedCoupon) {
+    const targeted = appliedCoupon.targetSkus || [];
+    if (targeted.length > 0) {
+      const eligibleTotal = cart
+        .filter(i => targeted.includes((i.sku || '').toUpperCase()) || targeted.includes((i.id || '').toUpperCase()))
+        .reduce((s, i) => s + i.priceInr * i.qty, 0);
+      discountAmountInr = eligibleTotal * (appliedCoupon.discountPercent / 100);
+    } else {
+      discountAmountInr = rawCartTotalInr * (appliedCoupon.discountPercent / 100);
+    }
+  }
   const finalPayableInr = Math.max(0, rawCartTotalInr - discountAmountInr);
 
   return (

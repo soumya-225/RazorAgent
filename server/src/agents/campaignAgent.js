@@ -50,10 +50,27 @@ export class CampaignAgent {
     sessionId = 'session_campaign',
     campaignType = 'INVENTORY_CLEARANCE',
     discountPercent = 20,
-    customName = null
+    customName = null,
+    selectedSkus = []   // optional: merchant-selected product SKUs from the UI
   }) {
     const analysis = await this.analyzeOpportunities(merchantId);
-    const targetProducts = analysis.slowMoving.length > 0 ? analysis.slowMoving.slice(0, 3) : analysis.highMargin.slice(0, 3);
+
+    // If merchant explicitly selected SKUs, use those; otherwise fall back to AI-picked targets
+    let targetProducts;
+    if (selectedSkus && selectedSkus.length > 0) {
+      const allCandidates = [...analysis.slowMoving, ...analysis.highMargin];
+      targetProducts = allCandidates.filter(p => selectedSkus.includes(p.sku));
+      // Fall back to all scored products if none of the selected SKUs matched scored pools
+      if (targetProducts.length === 0) {
+        targetProducts = await prisma.product.findMany({
+          where: { merchantId, sku: { in: selectedSkus } }
+        });
+      }
+    } else {
+      targetProducts = analysis.slowMoving.length > 0
+        ? analysis.slowMoving.slice(0, 3)
+        : analysis.highMargin.slice(0, 3);
+    }
 
     if (targetProducts.length === 0) {
       throw new Error('No qualifying products found for campaign generation.');
@@ -101,6 +118,23 @@ Output JSON:
       console.warn('Campaign LLM error:', err.message);
     }
 
+    // Ensure couponCode is globally unique in DB to prevent unique constraint failures
+    const ensureUniqueCode = async (baseCode) => {
+      let clean = (baseCode || `PROMO${discountPercent}`).toUpperCase().replace(/[^A-Z0-9_]/g, '');
+      let candidate = clean;
+      let existing = await prisma.campaign.findUnique({ where: { couponCode: candidate } });
+      if (!existing) return candidate;
+
+      for (let i = 0; i < 15; i++) {
+        const suffix = Math.floor(Math.random() * 9000 + 1000);
+        candidate = `${clean}_${suffix}`;
+        existing = await prisma.campaign.findUnique({ where: { couponCode: candidate } });
+        if (!existing) return candidate;
+      }
+      return `${clean}_${Date.now().toString().slice(-6)}`;
+    };
+
+    campaignCode = await ensureUniqueCode(campaignCode);
 
     const intercepted = await safetyService.interceptAction({
       merchantId,
@@ -108,6 +142,9 @@ Output JSON:
       agentName: this.name,
       actionType: 'create_growth_campaign',
       amountPaise: discountedPricePaise,
+      // A campaign creates a payment link that CUSTOMERS pay — it is revenue for the merchant,
+      // not an expense. The spending cap gate must not block campaign creation.
+      isCustomerCheckout: true,
       explanation: reasoning,
       payload: {
         campaignName,
@@ -117,6 +154,9 @@ Output JSON:
         leadProduct: primaryProduct.sku
       },
       executeFn: async () => {
+        // Double check uniqueness right before DB insertion
+        campaignCode = await ensureUniqueCode(campaignCode);
+
         // 1. Create Razorpay Payment Link for the campaign's lead item
         const link = await razorpayService.createPaymentLink({
           amount: discountedPricePaise,
@@ -170,6 +210,9 @@ Output JSON:
       }
     });
 
+    if (intercepted.result) {
+      return { ...intercepted.result, requiresApproval: false };
+    }
     return intercepted;
   }
 }

@@ -32,18 +32,60 @@ router.get('/', optionalMerchantAuth, async (req, res) => {
       ];
     }
 
-    const products = await prisma.product.findMany({
-      where,
-      orderBy: { createdAt: 'desc' }
-    });
+    const [products, activeCampaigns] = await Promise.all([
+      prisma.product.findMany({
+        where,
+        orderBy: { createdAt: 'desc' }
+      }),
+      prisma.campaign.findMany({
+        where: { status: 'ACTIVE' },
+        orderBy: { createdAt: 'desc' }
+      })
+    ]);
 
     const enriched = products.map(p => {
       const marginPercent = p.pricePaise > 0 ? Math.round(((p.pricePaise - p.costPaise) / p.pricePaise) * 100) : 0;
+
+      let activeDiscount = null;
+      for (const camp of activeCampaigns) {
+        if (camp.merchantId && p.merchantId && camp.merchantId !== p.merchantId) continue;
+        let targetedSkus = [];
+        if (Array.isArray(camp.targetSkus)) {
+          targetedSkus = camp.targetSkus.map(t => typeof t === 'string' ? t.toUpperCase() : (t.sku || t.id || '').toUpperCase()).filter(Boolean);
+        } else if (typeof camp.targetSkus === 'string') {
+          try {
+            const parsed = JSON.parse(camp.targetSkus);
+            targetedSkus = Array.isArray(parsed) ? parsed.map(t => typeof t === 'string' ? t.toUpperCase() : (t.sku || t.id || '').toUpperCase()).filter(Boolean) : [camp.targetSkus.toUpperCase()];
+          } catch {
+            targetedSkus = [camp.targetSkus.toUpperCase()];
+          }
+        }
+
+        const isTargeted = targetedSkus.length === 0 ||
+          targetedSkus.includes((p.sku || '').toUpperCase()) ||
+          targetedSkus.includes((p.id || '').toUpperCase());
+
+        if (isTargeted) {
+          const originalInr = p.pricePaise / 100;
+          const discountedInr = Math.round((originalInr * (100 - camp.discountPercent))) / 100;
+          activeDiscount = {
+            campaignId: camp.id,
+            campaignName: camp.name,
+            couponCode: camp.couponCode,
+            discountPercent: camp.discountPercent,
+            discountedPriceInr: discountedInr,
+            savingsInr: Math.round((originalInr - discountedInr) * 100) / 100
+          };
+          break;
+        }
+      }
+
       return {
         ...p,
         priceInr: p.pricePaise / 100,
         costInr: p.costPaise / 100,
         marginPercent,
+        activeCampaign: activeDiscount,
         isSlowMoving: p.salesCount30Days < 5 && p.inventory > 5,
         isHighMargin: marginPercent >= 40
       };
@@ -73,8 +115,10 @@ router.get('/coupon/:code', async (req, res) => {
     return res.json({
       code: campaign.couponCode,
       discountPercent: campaign.discountPercent || 10,
-      description: campaign.description || `${campaign.discountPercent || 10}% off your order`,
-      validUntil: campaign.endDate || null
+      description: campaign.name || `${campaign.discountPercent || 10}% off your order`,
+      targetSkus: campaign.targetSkus || [],
+      merchantId: campaign.merchantId || null,
+      validUntil: null
     });
   } catch (err) {
     return res.status(500).json({ error: err.message });
