@@ -140,5 +140,4 @@ npm start
 | **x402 Protocol** | `POST /api/protocol/checkout` | HTTP 402 challenge with RFC payment headers |
 | **x402 Settlement** | `POST /api/protocol/pay` | Payment token verification & order fulfillment |
 | **Razorpay Webhooks** | `POST /api/webhooks/razorpay` | HMAC-SHA256 signature verified event ingestion |
-#   R a z o r A g e n t  
- 
+#
