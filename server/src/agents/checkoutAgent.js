@@ -316,9 +316,10 @@ export class CheckoutAgent {
 
 === CRITICAL RULES (NEVER VIOLATE) ===
 1. You MUST only recommend products that exist EXACTLY in the catalog below. Never invent, hallucinate, or suggest products not listed.
-2. When recommending products, always use the EXACT name, SKU, and price from the catalog.
-3. If a user asks for a product type not in catalog, tell them honestly and suggest the closest available alternative from the list.
-4. NEVER mention brand names unless they appear verbatim in the catalog below.
+2. DO NOT write out lists, bullet points of products, or verbose descriptions of product specs/prices in your text response. The frontend automatically renders interactive product cards with direct Add-to-Cart buttons, prices, and discount badges below your message based on the ACTION recommendedSkus.
+3. Keep your conversational response brief, concise, and natural (e.g. "Here are our top recommended options for you:" or "I found these great deals running today:").
+4. If a user asks for a product type not in catalog, tell them honestly and suggest the closest available alternative from the list.
+5. NEVER mention brand names unless they appear verbatim in the catalog below.
 
 === ACTIVE PROMOTIONS & DISCOUNT CAMPAIGNS ===
 ${campaignsBrief}
@@ -331,9 +332,8 @@ ${merchantRegistryBrief}
 
 === DISCOUNT & PROMO AWARENESS (VERY IMPORTANT) ===
 - You are fully aware of all active promotional campaigns and discount codes above.
-- Whenever a user asks for discounts, deals, offers, promotions, cheap options, or inquires about a product with an active discount (such as Dell G15 or any item marked with 🔥 ACTIVE PROMO):
-  1. PROACTIVELY tell the customer about the discount! State the original price, the discount percentage, the coupon code, and the final discounted price (e.g. "The Dell G15 is currently on a 20% clearance sale! Use coupon code **CLEARANCE20_LP12** to get it for **₹64,000** instead of ₹80,000!").
-  2. In your reply, always highlight the savings and encourage the deal.
+- Whenever a user asks for discounts, deals, offers, promotions, cheap options, or inquires about a product with an active discount:
+  1. Briefly mention the discount/savings in a concise sentence. Do NOT write long text lists of all items since cards are displayed.
 - For purchases (CHECKOUT intent):
   If the purchased item has an active discount promo OR if the customer asked for a coupon, ALWAYS provide the coupon code in the action JSON:
   ACTION: {"intent": "CHECKOUT", "items": [{"sku": "EXACT_SKU_FROM_CATALOG", "qty": 1}], "coupon": "COUPON_CODE_HERE"}
@@ -371,6 +371,9 @@ ACTION: {"intent": "INFO", "recommendedSkus": ["SKU1", "SKU2"]}
         replyText = replyText.replace(/ACTION:\s*\{[\s\S]*?\}\s*$/m, '').trim();
       }
 
+      // Also strip Markdown code-fenced json action blocks if LLM outputted them
+      replyText = replyText.replace(/```(?:json)?\s*\{\s*"intent"[\s\S]*?\}\s*```/g, '').trim();
+
       // Strip any stray markdown code fences (```json ... ``` or ``` ... ```)
       replyText = replyText
         .replace(/```json[\s\S]*?```/g, '')
@@ -397,12 +400,9 @@ ACTION: {"intent": "INFO", "recommendedSkus": ["SKU1", "SKU2"]}
 
       if (discountedProducts.length > 0) {
         const topDeal = discountedProducts[0];
-        const dealList = discountedProducts.slice(0, 3).map(d =>
-          `• **${d.product.name}**: ₹${d.discount.discountedPriceInr.toLocaleString('en-IN')} (Regular ₹${d.discount.originalPriceInr.toLocaleString('en-IN')}) — **${d.discount.discountPercent}% OFF** with code **${d.discount.couponCode}**`
-        ).join('\n');
 
         return {
-          reply: `🎉 Here are our hottest active promotional deals:\n\n${dealList}\n\nWould you like to purchase any of these with the discount applied?`,
+          reply: `🎉 Here are our hottest active promotional deals running today. You can add them directly to your cart below:`,
           action: {
             intent: 'INFO',
             recommendedSkus: discountedProducts.slice(0, 3).map(d => d.product.sku),
@@ -416,12 +416,10 @@ ACTION: {"intent": "INFO", "recommendedSkus": ["SKU1", "SKU2"]}
     if (lower.includes('buy') || lower.includes('order') || lower.includes('checkout') || lower.includes('purchase')) {
       const targetProduct = matchedProduct || products[0];
       const discount = targetProduct ? getProductActiveCampaign(targetProduct, activeCampaigns) : null;
-      const originalInr = (targetProduct.pricePaise / 100).toLocaleString('en-IN');
-      const finalInr = discount ? discount.discountedPriceInr.toLocaleString('en-IN') : originalInr;
-      const discountMsg = discount ? ` with promo code **${discount.couponCode}** (${discount.discountPercent}% OFF, saving ₹${discount.savingsInr.toLocaleString('en-IN')})` : '';
+      const finalInr = discount ? discount.discountedPriceInr.toLocaleString('en-IN') : (targetProduct.pricePaise / 100).toLocaleString('en-IN');
 
       return {
-        reply: `I'd be delighted to help you checkout **${targetProduct.name}** for **₹${finalInr}**${discountMsg}. Would you like to complete the order now?`,
+        reply: `I'd be delighted to help you checkout ${targetProduct.name} for ₹${finalInr}. You can complete the order below:`,
         action: {
           intent: 'CHECKOUT',
           items: [{ sku: targetProduct.sku, qty: 1 }],
@@ -433,13 +431,8 @@ ACTION: {"intent": "INFO", "recommendedSkus": ["SKU1", "SKU2"]}
 
     if (matchedProduct) {
       const discount = getProductActiveCampaign(matchedProduct, activeCampaigns);
-      const originalInr = (matchedProduct.pricePaise / 100).toLocaleString('en-IN');
-      let promoText = `is available for **₹${originalInr}**.`;
-      if (discount) {
-        promoText = `is on special promo for **₹${discount.discountedPriceInr.toLocaleString('en-IN')}** (${discount.discountPercent}% OFF with coupon **${discount.couponCode}**, regular ₹${originalInr})!`;
-      }
       return {
-        reply: `**${matchedProduct.name}** ${promoText} ${matchedProduct.description}. Would you like me to add it to your order?`,
+        reply: `Here is **${matchedProduct.name}**! You can add it directly to your cart below:`,
         action: {
           intent: 'INFO',
           recommendedSkus: [matchedProduct.sku],
@@ -454,16 +447,8 @@ ACTION: {"intent": "INFO", "recommendedSkus": ["SKU1", "SKU2"]}
       .map(p => ({ product: p, discount: getProductActiveCampaign(p, activeCampaigns) }))
       .filter(x => x.discount !== null);
 
-    const featuredProduct = discountedProducts[0]?.product || products[0];
-    const featuredDiscount = discountedProducts[0]?.discount;
-
-    let welcomeNote = `Welcome to our store! We have high-performance audio, gaming accessories, and smart devices in stock.`;
-    if (featuredDiscount) {
-      welcomeNote += ` Don't miss our featured deal: **${featuredProduct.name}** at **${featuredDiscount.discountPercent}% OFF** for **₹${featuredDiscount.discountedPriceInr.toLocaleString('en-IN')}** using coupon **${featuredDiscount.couponCode}**!`;
-    }
-
     return {
-      reply: welcomeNote,
+      reply: `Welcome to our store! Here are some of our top products:`,
       action: {
         intent: 'INFO',
         recommendedSkus: products.slice(0, 3).map(p => p.sku)

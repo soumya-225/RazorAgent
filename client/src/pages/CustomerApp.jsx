@@ -1,5 +1,5 @@
 import React from 'react';
-import { ShoppingBag, LogOut, ChevronLeft, Zap, CreditCard, Bot } from 'lucide-react';
+import { ShoppingBag, LogOut, Zap } from 'lucide-react';
 import { useCustomerAuth } from '../context/CustomerAuthContext';
 import CustomerStorefront from './CustomerStorefront';
 
@@ -23,22 +23,14 @@ export default function CustomerApp({ onSwitchRole }) {
       {/* Customer Header */}
       <header className="sticky top-0 z-40 border-b border-violet-900/30 bg-[#07060f]/90 backdrop-blur-md">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 flex items-center justify-between h-14">
-          {/* Brand + back */}
-          <div className="flex items-center gap-3">
-            <button
-              onClick={() => onSwitchRole('landing')}
-              className="text-slate-600 hover:text-slate-300 transition-colors"
-            >
-              <ChevronLeft className="w-5 h-5" />
-            </button>
-            <div className="flex items-center gap-2.5">
-              <div className="w-8 h-8 rounded-lg bg-gradient-to-tr from-violet-700 to-purple-500 flex items-center justify-center shadow-md shadow-violet-600/20">
-                <ShoppingBag className="w-4 h-4 text-white" />
-              </div>
-              <div>
-                <span className="font-extrabold text-sm text-white">RazorAgent</span>
-                <span className="ml-1.5 text-[10px] text-violet-400 font-medium">Storefront</span>
-              </div>
+          {/* Brand */}
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-lg bg-gradient-to-tr from-violet-700 to-purple-500 flex items-center justify-center shadow-md shadow-violet-600/20">
+              <ShoppingBag className="w-4 h-4 text-white" />
+            </div>
+            <div>
+              <span className="font-extrabold text-sm text-white">RazorAgent</span>
+              <span className="ml-1.5 text-[10px] text-violet-400 font-medium">Storefront</span>
             </div>
           </div>
 
@@ -74,22 +66,6 @@ export default function CustomerApp({ onSwitchRole }) {
               </div>
             </div>
           )}
-        </div>
-
-        {/* AI agent status bar */}
-        <div className="border-t border-violet-900/20 bg-violet-950/20 px-4 sm:px-6 py-1.5 flex items-center gap-4 text-[10px]">
-          <span className="flex items-center gap-1.5 text-emerald-400 font-medium">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-            AI Shopping Agent Online
-          </span>
-          <span className="text-slate-600">•</span>
-          <span className="flex items-center gap-1 text-violet-400">
-            <Bot className="w-3 h-3" /> GPT-4o Powered
-          </span>
-          <span className="text-slate-600">•</span>
-          <span className="flex items-center gap-1 text-sky-400">
-            <CreditCard className="w-3 h-3" /> Razorpay Checkout Ready
-          </span>
         </div>
       </header>
 

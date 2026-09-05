@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import ReactMarkdown from 'react-markdown';
 import {
   Bot, Send, ShoppingCart, Sparkles, ArrowRight, Check, Trash2, Tag,
   ShieldCheck, AlertCircle, Plus, Zap, RefreshCw, MessageSquare, ShieldAlert
@@ -397,7 +398,9 @@ export default function StorefrontChat() {
                         : 'bg-blue-600 text-white shadow-md shadow-blue-600/20'
                       }`}
                   >
-                    <p className="whitespace-pre-wrap leading-relaxed">{m.content}</p>
+                    <div className="leading-relaxed space-y-1 [&_p]:my-1 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0 [&_ul]:my-1.5 [&_ul]:pl-4 [&_ul]:list-disc [&_ol]:my-1.5 [&_ol]:pl-4 [&_ol]:list-decimal [&_li]:my-0.5 [&_strong]:font-bold [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:rounded [&_code]:bg-slate-800 [&_code]:font-mono [&_code]:text-[11px]">
+                      <ReactMarkdown>{m.content}</ReactMarkdown>
+                    </div>
                     <span
                       className={`text-[9px] block mt-1.5 ${isAssistant ? 'text-slate-500' : 'text-blue-200'
                         }`}
