@@ -2,13 +2,16 @@ import React, { useState, useEffect, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
 import {
   Bot, Send, ShoppingCart, Sparkles, ArrowRight, Check, Trash2, Tag,
-  ShieldCheck, AlertCircle, Plus, Zap, RefreshCw, MessageSquare, ShieldAlert
+  ShieldCheck, AlertCircle, Plus, Zap, RefreshCw, MessageSquare, ShieldAlert, CheckCircle
 } from 'lucide-react';
 import api from '../api';
 import RazorpayModal from '../components/RazorpayModal';
 import ApprovalModal from '../components/ApprovalModal';
+import SBMDSetupModal from '../components/SBMDSetupModal';
+import { useAuth } from '../context/AuthContext';
 
 export default function StorefrontChat() {
+  const { merchant } = useAuth();
   const [products, setProducts] = useState([]);
   const [cart, setCart] = useState([]);
   const [messages, setMessages] = useState([
@@ -24,6 +27,14 @@ export default function StorefrontChat() {
   const [appliedCoupon, setAppliedCoupon] = useState(null);
   const [upsellData, setUpsellData] = useState(null);
   const [loadingUpsell, setLoadingUpsell] = useState(false);
+  const [checkoutMode, setCheckoutMode] = useState('sbmd');
+  const [sbmdReserveInr, setSbmdReserveInr] = useState(null);
+
+  // SBMD token — stored in localStorage after one-time setup
+  const [sbmdToken, setSbmdToken] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('sbmd_token')); } catch { return null; }
+  });
+  const [isSbmdSetupOpen, setIsSbmdSetupOpen] = useState(false);
 
   // Razorpay Checkout & Approval Modals
   const [checkoutOrder, setCheckoutOrder] = useState(null);
@@ -48,6 +59,36 @@ export default function StorefrontChat() {
       setUpsellData(null);
     }
   }, [cart]);
+
+  // Fetch SBMD reserve balance for the logged-in merchant
+  useEffect(() => {
+    if (merchant?.id) {
+      api.get(`/api/merchants/${merchant.id}/sbmd-reserve`)
+        .then(r => setSbmdReserveInr(r.data?.reserveInr ?? null))
+        .catch(() => {});
+    }
+  }, [merchant]);
+
+  // Persist SBMD token to localStorage whenever it changes
+  useEffect(() => {
+    if (sbmdToken) {
+      localStorage.setItem('sbmd_token', JSON.stringify(sbmdToken));
+    } else {
+      localStorage.removeItem('sbmd_token');
+    }
+  }, [sbmdToken]);
+
+  const handleSbmdSetupSuccess = ({ customerId, tokenId, method, isSandbox }) => {
+    setSbmdToken({ customerId, tokenId, method: method || 'card', isSandbox: isSandbox || false });
+    setMessages(prev => [
+      ...prev,
+      {
+        role: 'assistant',
+        content: `✅ **Frictionless checkout enabled!** Your payment method is saved${isSandbox ? ' (sandbox mode)' : ' via Razorpay'}. Future purchases will be captured instantly from your SBMD reserve — no checkout page, no PIN.`,
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      }
+    ]);
+  };
 
   const fetchCatalog = async () => {
     try {
@@ -96,6 +137,7 @@ export default function StorefrontChat() {
       : cart.map(i => ({ productId: i.id, sku: i.sku, qty: i.qty }));
 
     if (targetItems.length === 0) return;
+
     setLoadingChat(true);
 
     const activeCoupon = couponToApply || appliedCoupon?.code || null;
@@ -108,7 +150,9 @@ export default function StorefrontChat() {
           email: 'shopper@razoragent.demo',
           phone: '+919876543210'
         },
-        couponCode: activeCoupon
+        couponCode: activeCoupon,
+        sbmdPaymentMethod: checkoutMode === 'sbmd' ? { type: 'sbmd', method: 'sbmd' } : null,
+        sbmdToken: checkoutMode === 'sbmd' && sbmdToken ? sbmdToken : null
       });
 
       if (res.data?.requiresApproval) {
@@ -134,13 +178,40 @@ export default function StorefrontChat() {
 
       const orderResult = res.data?.result;
       if (orderResult) {
+        const paidWith = orderResult.paidWith || null;
+        const isSbmd = paidWith === 'SBMD';
+
+        if (isSbmd && orderResult.status === 'PAID') {
+          // SBMD reserve debit — instant, frictionless, no popup
+          setCart([]);
+          setAppliedCoupon(null);
+          setCouponCode('');
+          // Update displayed reserve balance
+          if (orderResult.remainingReserveInr !== undefined) {
+            setSbmdReserveInr(orderResult.remainingReserveInr);
+          }
+          const remainingText = orderResult.remainingReserveInr !== undefined
+            ? ` Reserve balance: **₹${orderResult.remainingReserveInr?.toLocaleString('en-IN')}** remaining.`
+            : '';
+          setMessages(prev => [
+            ...prev,
+            {
+              role: 'assistant',
+              content: `⚡ **Payment captured instantly!** ₹${orderResult.totalAmountInr?.toLocaleString('en-IN')} debited from your SBMD reserve for order **#${orderResult.orderNumber}**.${remainingText}\n\nNo checkout page. No PIN. Completely frictionless! 🎉`,
+              timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+            }
+          ]);
+          return;
+        }
+
+        // Reserve insufficient or SBMD disabled — fall back to Razorpay Checkout modal
         setCheckoutOrder(orderResult);
         setIsPayModalOpen(true);
         setMessages(prev => [
           ...prev,
           {
             role: 'assistant',
-            content: `✅ Order **#${orderResult.orderNumber}** created for **₹${orderResult.totalAmountInr?.toLocaleString('en-IN')}**! Complete your payment in the modal.`,
+            content: `✅ Order **#${orderResult.orderNumber}** created for **₹${orderResult.totalAmountInr?.toLocaleString('en-IN')}**! Complete your payment in the popup.`,
             timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
           }
         ]);
@@ -527,6 +598,57 @@ export default function StorefrontChat() {
                   </div>
                 )}
 
+                <div className="space-y-1.5 pt-1">
+                  <div className="text-[10px] uppercase tracking-wide text-slate-500">Checkout Mode</div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      onClick={() => setCheckoutMode('razorpay')}
+                      className={`px-2.5 py-1.5 rounded-lg border text-[11px] font-semibold transition-colors ${
+                        checkoutMode === 'razorpay'
+                          ? 'bg-blue-600/20 border-blue-500/40 text-blue-300'
+                          : 'bg-slate-900 border-slate-800 text-slate-300 hover:bg-slate-800'
+                      }`}
+                    >
+                      Razorpay
+                    </button>
+                    <button
+                      onClick={() => setCheckoutMode('sbmd')}
+                      className={`px-2.5 py-1.5 rounded-lg border text-[11px] font-semibold transition-colors ${
+                        checkoutMode === 'sbmd'
+                          ? 'bg-emerald-600/20 border-emerald-500/40 text-emerald-300'
+                          : 'bg-slate-900 border-slate-800 text-slate-300 hover:bg-slate-800'
+                      }`}
+                    >
+                      SBMD Auto-Pay
+                    </button>
+                  </div>
+                  {checkoutMode === 'sbmd' && (
+                    <div className="space-y-1.5">
+                      {sbmdReserveInr !== null ? (
+                        <div className="p-2 rounded-lg bg-emerald-500/10 border border-emerald-500/20 space-y-1">
+                          <div className="flex justify-between text-[10px]">
+                            <span className="text-emerald-400 font-semibold">SBMD Reserve</span>
+                            <span className={`font-mono font-bold ${sbmdReserveInr >= finalPayableInr ? 'text-emerald-400' : 'text-red-400'}`}>
+                              ₹{sbmdReserveInr.toLocaleString('en-IN')} available
+                            </span>
+                          </div>
+                          {finalPayableInr > 0 && (
+                            <div className="text-[10px] text-slate-400">
+                              {sbmdReserveInr >= finalPayableInr
+                                ? `✅ Reserve covers this order. Payment will be instant & frictionless.`
+                                : `⚠️ Reserve (₹${sbmdReserveInr.toLocaleString('en-IN')}) is less than cart total. Razorpay Checkout will open instead.`}
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <div className="text-[10px] text-slate-400">
+                          {merchant ? 'Loading reserve...' : 'Login to use SBMD Auto-Pay.'}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+
                 {/* Cart Total Breakdown */}
                 <div className="pt-2 border-t border-slate-800 space-y-1 text-xs">
                   <div className="flex justify-between text-slate-400">
@@ -549,7 +671,7 @@ export default function StorefrontChat() {
                   onClick={handleInitiateCheckout}
                   className="w-full py-2.5 px-4 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs shadow-lg shadow-blue-600/30 flex items-center justify-center gap-2 transition-all cursor-pointer"
                 >
-                  Proceed to Razorpay Checkout
+                  {checkoutMode === 'sbmd' ? 'Proceed with SBMD Auto-Pay' : 'Proceed to Razorpay Checkout'}
                   <ArrowRight className="w-3.5 h-3.5" />
                 </button>
               </div>
@@ -625,6 +747,13 @@ export default function StorefrontChat() {
             ]);
           }
         }}
+      />
+
+      {/* SBMD One-time Setup Modal */}
+      <SBMDSetupModal
+        isOpen={isSbmdSetupOpen}
+        onClose={() => setIsSbmdSetupOpen(false)}
+        onSuccess={handleSbmdSetupSuccess}
       />
     </div>
   );

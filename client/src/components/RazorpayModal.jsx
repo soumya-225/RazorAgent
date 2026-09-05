@@ -32,6 +32,15 @@ export default function RazorpayModal({ isOpen, onClose, order, onSuccess }) {
     }
   }, []);
 
+  useEffect(() => {
+    if (isOpen && order?.razorpayOrderId && order.razorpayOrderId.startsWith('order_') && !order.razorpayOrderId.startsWith('order_test_')) {
+      const timer = setTimeout(() => {
+        handleOpenOfficialRazorpayCheckout();
+      }, 400);
+      return () => clearTimeout(timer);
+    }
+  }, [isOpen, order?.razorpayOrderId]);
+
   if (!isOpen || !order) return null;
 
   const orderIdentifier = order.id || order.orderId;
@@ -104,6 +113,11 @@ export default function RazorpayModal({ isOpen, onClose, order, onSuccess }) {
   };
 
   const handleSimulatePayment = async () => {
+    // If order has a real Razorpay order ID, process via official Razorpay Checkout popup so payments are captured on Razorpay
+    if (order.razorpayOrderId && order.razorpayOrderId.startsWith('order_') && !order.razorpayOrderId.startsWith('order_test_')) {
+      return handleOpenOfficialRazorpayCheckout();
+    }
+
     setProcessing(true);
     try {
       const res = await api.post(`/api/orders/${orderIdentifier}/pay-simulate`);

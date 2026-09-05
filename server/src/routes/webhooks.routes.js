@@ -12,10 +12,13 @@ const router = express.Router();
 router.post('/razorpay', async (req, res) => {
   try {
     const signature = req.headers['x-razorpay-signature'];
-    const payload = req.body;
+    // Use raw body Buffer for HMAC signature verification (must match exact bytes Razorpay signed)
+    const rawPayload = req.rawBody || Buffer.from(JSON.stringify(req.body));
+    // Use parsed JSON body for reading event data
+    const body = req.body;
 
     const isValid = razorpayService.verifyWebhookSignature({
-      payload,
+      payload: rawPayload,
       signature
     });
 
@@ -24,17 +27,40 @@ router.post('/razorpay', async (req, res) => {
       return res.status(400).json({ error: 'Invalid webhook signature' });
     }
 
-    const event = payload.event;
-    const eventData = payload.payload;
+    const event = body.event;
+    const eventData = body.payload;
 
     console.log(`🔔 Webhook received: ${event}`);
 
+    // ── payment.authorized: immediately capture (SBMD recurring payment flow) ──
+    if (event === 'payment.authorized') {
+      const paymentEntity = eventData.payment?.entity;
+      if (paymentEntity?.id && paymentEntity?.amount) {
+        console.log(`⚡ Auto-capturing authorized payment ${paymentEntity.id} (₹${paymentEntity.amount / 100})`);
+        try {
+          await razorpayService.capturePayment(paymentEntity.id, paymentEntity.amount);
+          console.log(`✅ Payment ${paymentEntity.id} captured via webhook handler`);
+        } catch (capErr) {
+          console.error(`Failed to auto-capture ${paymentEntity.id}: ${capErr.message}`);
+        }
+      }
+    }
+
+    // ── payment.captured: mark order PAID, decrement cap, reduce inventory ──
     if (event === 'payment.captured') {
       const paymentEntity = eventData.payment?.entity;
-      if (paymentEntity && paymentEntity.order_id) {
-        const order = await prisma.order.findUnique({
-          where: { razorpayOrderId: paymentEntity.order_id }
-        });
+      if (paymentEntity) {
+        let order = null;
+        if (paymentEntity.order_id) {
+          order = await prisma.order.findUnique({
+            where: { razorpayOrderId: paymentEntity.order_id }
+          });
+        }
+        if (!order && paymentEntity.invoice_id) {
+          order = await prisma.order.findFirst({
+            where: { razorpayPaymentLinkId: paymentEntity.invoice_id }
+          });
+        }
 
         if (order) {
           await prisma.payment.upsert({
@@ -43,26 +69,50 @@ router.post('/razorpay', async (req, res) => {
             create: {
               razorpayPaymentId: paymentEntity.id,
               orderId: order.id,
-              amountPaise: paymentEntity.amount,
+              amountPaise: paymentEntity.amount || order.totalAmountPaise,
               currency: paymentEntity.currency || 'INR',
-              method: paymentEntity.method || 'card',
+              method: paymentEntity.method || 'sbmd_recurring',
               status: 'captured'
             }
           });
 
-          await prisma.order.update({
-            where: { id: order.id },
-            data: { status: 'PAID' }
-          });
+          if (order.status !== 'PAID') {
+            await prisma.order.update({
+              where: { id: order.id },
+              data: { status: 'PAID' }
+            });
+
+            // Decrement merchant spending cap
+            if (order.merchantId) {
+              await prisma.merchant.update({
+                where: { id: order.merchantId },
+                data: { spendingCapPaise: { decrement: order.totalAmountPaise } }
+              }).catch(() => {});
+            }
+
+            // Reduce inventory for fulfilled items
+            const items = Array.isArray(order.items) ? order.items : [];
+            for (const item of items) {
+              if (item.productId) {
+                await prisma.product.update({
+                  where: { id: item.productId },
+                  data: {
+                    inventory: { decrement: item.qty || 1 },
+                    salesCount30Days: { increment: item.qty || 1 }
+                  }
+                }).catch(() => {});
+              }
+            }
+          }
 
           await safetyService.logAudit({
             sessionId: 'webhook_listener',
             agentName: 'RAZORPAY_WEBHOOK',
             actionType: 'payment.captured',
             actionPayload: { paymentId: paymentEntity.id, orderId: order.id, amountPaise: paymentEntity.amount },
-            explanation: `Webhook verified: Payment ${paymentEntity.id} captured for Order #${order.orderNumber}.`,
+            explanation: `Razorpay Webhook: Payment ${paymentEntity.id} captured for Order #${order.orderNumber}.`,
             status: 'SUCCESS',
-            amountInr: paymentEntity.amount / 100,
+            amountInr: (paymentEntity.amount || order.totalAmountPaise) / 100,
             razorpayEntityId: paymentEntity.id
           });
         }
