@@ -80,6 +80,7 @@ export class CheckoutAgent {
     customer = {},
     couponCode = null,
     sbmdPaymentMethod = null,
+    sbmdToken = null,
     explanation = 'Customer initiated checkout'
   }) {
     if (!items || items.length === 0) {
@@ -91,10 +92,13 @@ export class CheckoutAgent {
     const orderItems = [];
 
     for (const item of items) {
+      const conditions = [];
+      if (item.productId) conditions.push({ id: item.productId });
+      if (item.sku) conditions.push({ sku: item.sku });
+      if (item.name) conditions.push({ name: { contains: item.name, mode: 'insensitive' } });
+
       const product = await prisma.product.findFirst({
-        where: {
-          OR: [{ id: item.productId || '' }, { sku: item.sku || '' }, { name: { contains: item.name || '', mode: 'insensitive' } }]
-        }
+        where: conditions.length > 0 ? { OR: conditions } : { id: 'none' }
       });
 
       if (!product) {
@@ -135,9 +139,11 @@ export class CheckoutAgent {
     const finalAmountPaise = Math.max(100, computedTotalPaise - discountPaise); // Minimum ₹1
     const orderNumber = `ORD-${Date.now().toString().slice(-6)}-${Math.floor(Math.random() * 900 + 100)}`;
 
+    const targetMerchantId = merchantId || (await prisma.merchant.findFirst())?.id;
+
     // Safety Interceptor handles spending caps and audit trails
     const intercepted = await safetyService.interceptAction({
-      merchantId,
+      merchantId: targetMerchantId,
       sessionId,
       agentName: this.name,
       actionType: 'create_order',
@@ -193,7 +199,10 @@ export class CheckoutAgent {
         // 4. Attempt automatic SBMD capture when enabled and merchant has sufficient allocated funds
         try {
           const sbmdEnabledGlobally = (config && config.sbmdEnabled) || (process.env.SBMD_ENABLED === 'true');
-          const merchantRecord = merchantId ? await prisma.merchant.findUnique({ where: { id: merchantId } }) : null;
+          const merchantRecord = merchantId
+            ? await prisma.merchant.findUnique({ where: { id: merchantId } })
+            : await prisma.merchant.findFirst();
+          const targetMerchantId = merchantId || merchantRecord?.id;
 
           // Preference 1: If caller provided a saved payment instrument (token/mandate) and Razorpay is live, try server-side capture via Razorpay
           if (sbmdPaymentMethod && config.isRazorpayLive) {
@@ -269,15 +278,17 @@ export class CheckoutAgent {
             }
           }
 
-          // Preference 2: If platform-managed SBMD (internal spending cap) is enabled and merchant eligible, use internal SBMD execution
-          if (sbmdEnabledGlobally && merchantRecord) {
-            const eligible = await sbmdService.isEligible(merchantId, finalAmountPaise);
+          // Preference 2: SBMD (Single Block Multi Debit / Spending Cap Auto-Pay) execution
+          if ((sbmdPaymentMethod || sbmdEnabledGlobally) && merchantRecord) {
+            const eligible = await sbmdService.isEligible(targetMerchantId, finalAmountPaise);
             if (eligible) {
               try {
                 const sbmdPayment = await sbmdService.executePayment({
-                  merchantId,
+                  merchantId: targetMerchantId,
                   orderId: savedOrder.id,
                   amountPaise: finalAmountPaise,
+                  razorpayOrderId: rzpOrder.id,
+                  sbmdToken: sbmdToken || null,
                   orderNumber,
                   sessionId
                 });
@@ -289,18 +300,19 @@ export class CheckoutAgent {
                   totalAmountInr: finalAmountPaise / 100,
                   totalAmountPaise: finalAmountPaise,
                   discountAmountInr: discountPaise / 100,
-                  paymentLinkUrl: rzpLink.short_url,
-                  paymentLinkId: rzpLink.id,
                   items: orderItems,
                   status: 'PAID',
                   payment: sbmdPayment,
                   isSandbox: rzpOrder.isSandbox,
-                  paidWith: 'SBMD'
+                  paidWith: 'SBMD',
+                  remainingReserveInr: sbmdPayment.remainingReserveInr
                 };
               } catch (err) {
                 console.warn('SBMD automatic capture failed:', err.message);
-                // fall-through to return created order (CREATED)
+                // fall-through to return created order for Razorpay Checkout
               }
+            } else {
+              console.log(`SBMD reserve insufficient for ₹${(finalAmountPaise / 100).toFixed(2)} — falling back to Razorpay Checkout`);
             }
           }
         } catch (err) {

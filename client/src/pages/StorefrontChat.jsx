@@ -25,7 +25,8 @@ export default function StorefrontChat() {
   const [appliedCoupon, setAppliedCoupon] = useState(null);
   const [upsellData, setUpsellData] = useState(null);
   const [loadingUpsell, setLoadingUpsell] = useState(false);
-  const [checkoutMode, setCheckoutMode] = useState('razorpay');
+  const [checkoutMode, setCheckoutMode] = useState('sbmd');
+  const [sbmdReserveInr, setSbmdReserveInr] = useState(null);
 
   // Razorpay Checkout & Approval Modals
   const [checkoutOrder, setCheckoutOrder] = useState(null);
@@ -50,6 +51,15 @@ export default function StorefrontChat() {
       setUpsellData(null);
     }
   }, [cart]);
+
+  // Fetch SBMD reserve balance for the logged-in merchant
+  useEffect(() => {
+    if (merchant?.id) {
+      api.get(`/api/merchants/${merchant.id}/sbmd-reserve`)
+        .then(r => setSbmdReserveInr(r.data?.reserveInr ?? null))
+        .catch(() => {});
+    }
+  }, [merchant]);
 
   const fetchCatalog = async () => {
     try {
@@ -98,17 +108,6 @@ export default function StorefrontChat() {
       : cart.map(i => ({ productId: i.id, sku: i.sku, qty: i.qty }));
 
     if (targetItems.length === 0) return;
-    if (checkoutMode === 'sbmd' && !merchant) {
-      setMessages(prev => [
-        ...prev,
-        {
-          role: 'assistant',
-          content: '⚠️ SBMD needs a logged-in merchant session (so spending cap and approval rules can be applied). Please login first, then retry.',
-          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-        }
-      ]);
-      return;
-    }
 
     setLoadingChat(true);
 
@@ -150,30 +149,39 @@ export default function StorefrontChat() {
       const orderResult = res.data?.result;
       if (orderResult) {
         const paidWith = orderResult.paidWith || null;
-        const isSbmdPaid = orderResult.status === 'PAID' && typeof paidWith === 'string' && paidWith.startsWith('SBMD');
+        const isSbmd = paidWith === 'SBMD';
 
-        if (isSbmdPaid) {
+        if (isSbmd && orderResult.status === 'PAID') {
+          // SBMD reserve debit — instant, frictionless, no popup
           setCart([]);
           setAppliedCoupon(null);
           setCouponCode('');
+          // Update displayed reserve balance
+          if (orderResult.remainingReserveInr !== undefined) {
+            setSbmdReserveInr(orderResult.remainingReserveInr);
+          }
+          const remainingText = orderResult.remainingReserveInr !== undefined
+            ? ` Reserve balance: **₹${orderResult.remainingReserveInr?.toLocaleString('en-IN')}** remaining.`
+            : '';
           setMessages(prev => [
             ...prev,
             {
               role: 'assistant',
-              content: `✅ SBMD payment captured instantly for order **#${orderResult.orderNumber}** (₹${orderResult.totalAmountInr?.toLocaleString('en-IN')}). No Razorpay popup needed.`,
+              content: `⚡ **Payment captured instantly!** ₹${orderResult.totalAmountInr?.toLocaleString('en-IN')} debited from your SBMD reserve for order **#${orderResult.orderNumber}**.${remainingText}\n\nNo checkout page. No PIN. Completely frictionless! 🎉`,
               timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
             }
           ]);
           return;
         }
 
+        // Reserve insufficient or SBMD disabled — fall back to Razorpay Checkout modal
         setCheckoutOrder(orderResult);
         setIsPayModalOpen(true);
         setMessages(prev => [
           ...prev,
           {
             role: 'assistant',
-            content: `✅ Order **#${orderResult.orderNumber}** created for **₹${orderResult.totalAmountInr?.toLocaleString('en-IN')}**! Complete your payment in the modal.`,
+            content: `✅ Order **#${orderResult.orderNumber}** created for **₹${orderResult.totalAmountInr?.toLocaleString('en-IN')}**! Complete your payment in the popup.`,
             timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
           }
         ]);
@@ -550,10 +558,28 @@ export default function StorefrontChat() {
                     </button>
                   </div>
                   {checkoutMode === 'sbmd' && (
-                    <div className="text-[10px] text-emerald-400">
-                      {merchant
-                        ? `SBMD enabled for ${merchant.storeName || merchant.name}. If cap allows, payment is auto-captured without popup.`
-                        : 'Login as a merchant to use SBMD (required for spending-cap checks).'}
+                    <div className="space-y-1.5">
+                      {sbmdReserveInr !== null ? (
+                        <div className="p-2 rounded-lg bg-emerald-500/10 border border-emerald-500/20 space-y-1">
+                          <div className="flex justify-between text-[10px]">
+                            <span className="text-emerald-400 font-semibold">SBMD Reserve</span>
+                            <span className={`font-mono font-bold ${sbmdReserveInr >= finalPayableInr ? 'text-emerald-400' : 'text-red-400'}`}>
+                              ₹{sbmdReserveInr.toLocaleString('en-IN')} available
+                            </span>
+                          </div>
+                          {finalPayableInr > 0 && (
+                            <div className="text-[10px] text-slate-400">
+                              {sbmdReserveInr >= finalPayableInr
+                                ? `✅ Reserve covers this order. Payment will be instant & frictionless.`
+                                : `⚠️ Reserve (₹${sbmdReserveInr.toLocaleString('en-IN')}) is less than cart total. Razorpay Checkout will open instead.`}
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <div className="text-[10px] text-slate-400">
+                          {merchant ? 'Loading reserve...' : 'Login to use SBMD Auto-Pay.'}
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>

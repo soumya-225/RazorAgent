@@ -1,5 +1,6 @@
 import Razorpay from 'razorpay';
 import crypto from 'crypto';
+import fetch from 'node-fetch';
 import config from '../config/env.js';
 
 class RazorpayService {
@@ -28,6 +29,7 @@ class RazorpayService {
           amount, // in paise
           currency,
           receipt: receipt || `rec_${Date.now()}`,
+          payment_capture: 1,
           notes
         });
         return {
@@ -175,15 +177,105 @@ class RazorpayService {
     }
   }
 
+  /**
+   * Create a Razorpay Customer for recurring mandate registration
+   */
+  async createCustomer({ name, email, contact }) {
+    if (this.isLive && this.client) {
+      try {
+        return await this.client.customers.create({
+          name: name || 'RazorAgent User',
+          email: email || 'user@razoragent.demo',
+          contact: contact || '+919876543210',
+          fail_existing: '0'
+        });
+      } catch (err) {
+        console.warn('Razorpay customer creation failed:', err.message);
+      }
+    }
+    return { id: `cust_test_${crypto.randomBytes(6).toString('hex')}`, isSandbox: true };
+  }
+
+  /**
+   * Fetch all saved tokens for a Razorpay customer
+   */
+  async fetchCustomerTokens(customerId) {
+    if (!this.isLive || !customerId || customerId.startsWith('cust_test_')) return [];
+    try {
+      const res = await fetch(
+        `https://api.razorpay.com/v1/customers/${customerId}/tokens`,
+        {
+          headers: {
+            Authorization: 'Basic ' + Buffer.from(`${config.razorpayKeyId}:${config.razorpayKeySecret}`).toString('base64')
+          }
+        }
+      );
+      const data = await res.json();
+      return data?.items || [];
+    } catch (err) {
+      console.warn('Failed to fetch customer tokens:', err.message);
+      return [];
+    }
+  }
+
+  /**
+   * Create a recurring payment using a saved token (SBMD frictionless debit)
+   * Payment goes: created -> authorized (no user interaction needed for saved tokens)
+   */
+  async createRecurringPayment({ orderId, customerId, tokenId, amount, currency = 'INR', email, contact }) {
+    if (!this.isLive || !this.client) {
+      return this.simulatePaymentCapture({ orderId, amount, method: 'sbmd_recurring' });
+    }
+
+    const res = await fetch('https://api.razorpay.com/v1/payments/create/recurring', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: 'Basic ' + Buffer.from(`${config.razorpayKeyId}:${config.razorpayKeySecret}`).toString('base64')
+      },
+      body: JSON.stringify({
+        email: email || 'user@razoragent.demo',
+        contact: contact || '+919876543210',
+        amount,
+        currency,
+        order_id: orderId,
+        customer_id: customerId,
+        token: tokenId,
+        recurring: '1',
+        description: 'RazorAgent SBMD Frictionless Pay',
+        notes: { source: 'razoragent_sbmd' }
+      })
+    });
+
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data?.error?.description || `Recurring payment failed: ${res.status}`);
+    }
+    return data;
+  }
+
+  /**
+   * Capture an authorized payment
+   */
+  async capturePayment(paymentId, amount, currency = 'INR') {
+    if (!this.isLive || !this.client) {
+      return { id: paymentId, status: 'captured', amount };
+    }
+    return this.client.payments.capture(paymentId, amount, currency);
+  }
+
   verifyWebhookSignature({ payload, signature, secret }) {
     if (!signature) return false;
     const webhookSecret = secret || config.razorpayWebhookSecret;
     if (!webhookSecret) return true;
 
     try {
+      const dataToSign = Buffer.isBuffer(payload)
+        ? payload
+        : (typeof payload === 'string' ? payload : JSON.stringify(payload));
       const expectedSignature = crypto
         .createHmac('sha256', webhookSecret)
-        .update(typeof payload === 'string' ? payload : JSON.stringify(payload))
+        .update(dataToSign)
         .digest('hex');
       return crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expectedSignature));
     } catch {
