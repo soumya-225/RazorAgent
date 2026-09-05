@@ -17,4 +17,5 @@ RUN chmod +x ./docker-entrypoint.sh
 
 EXPOSE 5000
 
-CMD ["./docker-entrypoint.sh"]
+# Use bash to run the entrypoint script so the shebang is interpreted reliably
+ENTRYPOINT ["/bin/bash", "/usr/src/app/docker-entrypoint.sh"]
