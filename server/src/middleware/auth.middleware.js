@@ -11,7 +11,11 @@ export async function requireMerchantAuth(req, res, next) {
 
     const token = authHeader.split(' ')[1];
     const decoded = jwt.verify(token, config.jwtSecret);
-    
+
+    if (!decoded.merchantId) {
+      return res.status(401).json({ error: 'Invalid token type.' });
+    }
+
     const merchant = await prisma.merchant.findUnique({
       where: { id: decoded.merchantId },
       select: {
@@ -22,7 +26,7 @@ export async function requireMerchantAuth(req, res, next) {
         currency: true,
         spendingCapPaise: true,
         approvalThresholdPaise: true,
-        apiKey: true
+        apiKey: true   // needed so /api/auth/me returns it to the frontend
       }
     });
 
@@ -43,12 +47,20 @@ export async function optionalMerchantAuth(req, res, next) {
     if (authHeader && authHeader.startsWith('Bearer ')) {
       const token = authHeader.split(' ')[1];
       const decoded = jwt.verify(token, config.jwtSecret);
-      const merchant = await prisma.merchant.findUnique({
-        where: { id: decoded.merchantId },
-        select: { id: true, email: true, name: true, storeName: true, spendingCapPaise: true, approvalThresholdPaise: true }
-      });
-      if (merchant) {
-        req.merchant = merchant;
+
+      // Only process if this is a merchant token (has merchantId claim)
+      if (decoded.merchantId) {
+        const merchant = await prisma.merchant.findUnique({
+          where: { id: decoded.merchantId },
+          select: {
+            id: true, email: true, name: true, storeName: true,
+            spendingCapPaise: true, approvalThresholdPaise: true,
+            apiKey: true  // needed by Overview for /api/marketplace/analytics
+          }
+        });
+        if (merchant) {
+          req.merchant = merchant;
+        }
       }
     }
   } catch {}

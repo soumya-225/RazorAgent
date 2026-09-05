@@ -7,6 +7,10 @@ import { requireMerchantAuth } from '../middleware/auth.middleware.js';
 
 const router = express.Router();
 
+// In-memory customer store (JWT-only, no DB migration needed)
+// Customers are identified by email, profile encoded in JWT.
+const customerStore = new Map(); // email -> { passwordHash, profile }
+
 /**
  * POST /api/auth/register
  */
@@ -137,6 +141,112 @@ router.patch('/settings', requireMerchantAuth, async (req, res) => {
     });
   } catch (err) {
     return res.status(500).json({ error: err.message });
+  }
+});
+
+// =============================================================================
+// CUSTOMER AUTH — JWT only, no DB model required
+// =============================================================================
+
+/**
+ * POST /api/auth/customer/register
+ * Customer registration — profile stored in JWT + in-memory map
+ */
+router.post('/customer/register', async (req, res) => {
+  try {
+    const {
+      email, password, name, phone,
+      preferredPayment, autopayThresholdInr, address
+    } = req.body;
+
+    if (!email || !password || !name) {
+      return res.status(400).json({ error: 'Email, password, and name are required.' });
+    }
+    if (customerStore.has(email)) {
+      return res.status(400).json({ error: 'A customer account with this email already exists.' });
+    }
+
+    const passwordHash = await bcrypt.hash(password, 10);
+    const profile = {
+      email,
+      name,
+      phone: phone || '',
+      preferredPayment: preferredPayment || 'card',
+      autopayThresholdInr: Number(autopayThresholdInr) || 2000,
+      address: address || ''
+    };
+    customerStore.set(email, { passwordHash, profile });
+
+    const token = jwt.sign(
+      { role: 'customer', customer: profile },
+      config.jwtSecret,
+      { expiresIn: '30d' }
+    );
+
+    return res.status(201).json({
+      message: 'Customer account created successfully',
+      token,
+      customer: profile
+    });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * POST /api/auth/customer/login
+ */
+router.post('/customer/login', async (req, res) => {
+  try {
+    const { email, password } = req.body;
+    if (!email || !password) {
+      return res.status(400).json({ error: 'Email and password are required.' });
+    }
+
+    const record = customerStore.get(email);
+    if (!record) {
+      return res.status(401).json({ error: 'Invalid email or password.' });
+    }
+
+    const isValid = await bcrypt.compare(password, record.passwordHash);
+    if (!isValid) {
+      return res.status(401).json({ error: 'Invalid email or password.' });
+    }
+
+    const token = jwt.sign(
+      { role: 'customer', customer: record.profile },
+      config.jwtSecret,
+      { expiresIn: '30d' }
+    );
+
+    return res.json({
+      message: 'Login successful',
+      token,
+      customer: record.profile
+    });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * GET /api/auth/customer/me
+ * Decode customer JWT and return profile
+ */
+router.get('/customer/me', (req, res) => {
+  try {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return res.status(401).json({ error: 'No token provided.' });
+    }
+    const token = authHeader.split(' ')[1];
+    const decoded = jwt.verify(token, config.jwtSecret);
+    if (decoded.role !== 'customer') {
+      return res.status(403).json({ error: 'Not a customer token.' });
+    }
+    return res.json({ customer: decoded.customer });
+  } catch (err) {
+    return res.status(401).json({ error: 'Invalid or expired token.' });
   }
 });
 

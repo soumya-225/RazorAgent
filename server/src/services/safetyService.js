@@ -62,7 +62,8 @@ class SafetyService {
     explanation = 'Automated transaction request',
     payload = {},
     executeFn,
-    sessionContext = {}
+    sessionContext = {},
+    isCustomerCheckout = false  // when true, skip spending cap + approval gate (human buyer, not AI agent)
   }) {
     const amountInr = (amountPaise || 0) / 100;
 
@@ -82,7 +83,8 @@ class SafetyService {
     const sessionSpent = sessionContext.spentPaise || 0;
 
     // 1. Boundary Check: Spending Cap
-    if (amountPaise > 0 && sessionSpent + amountPaise > sessionCap) {
+    // NOTE: Only applies to autonomous AI agents. Human customer checkouts bypass this gate.
+    if (!isCustomerCheckout && amountPaise > 0 && sessionSpent + amountPaise > sessionCap) {
       const remainingPaise = Math.max(0, sessionCap - sessionSpent);
       const blockedMsg = `Spending cap exceeded. Required: ₹${amountInr.toFixed(2)}, Available Budget: ₹${(remainingPaise / 100).toFixed(2)}`;
       
@@ -105,7 +107,8 @@ class SafetyService {
     }
 
     // 2. Gating Check: High-Value Human Approval Gate
-    if (amountPaise > approvalThresholdPaise && !sessionContext.isApprovedByHuman) {
+    // NOTE: Only applies to autonomous AI agents. Human customers complete checkout directly.
+    if (!isCustomerCheckout && amountPaise > approvalThresholdPaise && !sessionContext.isApprovedByHuman) {
       const gateMsg = `Transaction amount ₹${amountInr.toFixed(2)} exceeds high-value threshold ₹${(approvalThresholdPaise / 100).toFixed(2)}. Human approval required.`;
       
       // Create Approval Request

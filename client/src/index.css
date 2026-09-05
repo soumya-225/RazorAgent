@@ -1,3 +1,5 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;700&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -5,46 +7,226 @@
 @layer base {
   body {
     font-family: 'Inter', sans-serif;
+    -webkit-font-smoothing: antialiased;
   }
   code, pre, .font-mono {
     font-family: 'JetBrains Mono', monospace;
   }
 }
 
-/* Custom Scrollbars */
-::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
-}
-::-webkit-scrollbar-track {
-  background: #090d16;
-}
-::-webkit-scrollbar-thumb {
-  background: #1e293b;
-  border-radius: 9999px;
-}
-::-webkit-scrollbar-thumb:hover {
-  background: #334155;
-}
+/* ===== Custom Scrollbars ===== */
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 9999px; }
+::-webkit-scrollbar-thumb:hover { background: #334155; }
 
+/* ===== MERCHANT THEME — Blue/Indigo ===== */
 .glass-card {
   background: rgba(15, 23, 42, 0.75);
-  backdrop-filter: blur(12px);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
   border: 1px solid rgba(51, 65, 85, 0.4);
 }
 
 .glass-card-hover {
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
 }
 .glass-card-hover:hover {
-  border-color: rgba(59, 130, 246, 0.5);
-  box-shadow: 0 10px 25px -5px rgba(14, 165, 233, 0.1);
+  border-color: rgba(59, 130, 246, 0.45);
+  box-shadow: 0 8px 30px -8px rgba(59, 130, 246, 0.15);
+  transform: translateY(-1px);
 }
 
-.glow-blue {
-  box-shadow: 0 0 20px -3px rgba(59, 130, 246, 0.35);
+/* ===== CUSTOMER THEME — Violet/Purple ===== */
+.glass-card-customer {
+  background: rgba(15, 10, 30, 0.80);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(109, 40, 217, 0.25);
 }
 
-.glow-green {
-  box-shadow: 0 0 20px -3px rgba(34, 197, 94, 0.35);
+.glass-card-customer-hover {
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.glass-card-customer-hover:hover {
+  border-color: rgba(139, 92, 246, 0.5);
+  box-shadow: 0 8px 30px -8px rgba(139, 92, 246, 0.2);
+  transform: translateY(-1px);
+}
+
+/* ===== Product Card ===== */
+.product-tile {
+  background: rgba(17, 10, 36, 0.85);
+  border: 1px solid rgba(109, 40, 217, 0.2);
+  border-radius: 1rem;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  overflow: hidden;
+}
+.product-tile:hover {
+  border-color: rgba(139, 92, 246, 0.55);
+  box-shadow: 0 12px 40px -10px rgba(139, 92, 246, 0.25);
+  transform: translateY(-2px);
+}
+
+/* ===== Glow Effects ===== */
+.glow-blue  { box-shadow: 0 0 24px -4px rgba(59, 130, 246, 0.4); }
+.glow-green { box-shadow: 0 0 24px -4px rgba(34, 197, 94, 0.4); }
+.glow-violet { box-shadow: 0 0 24px -4px rgba(139, 92, 246, 0.45); }
+
+/* ===== Merchant Dashboard Stat Card ===== */
+.stat-card {
+  position: relative;
+  overflow: hidden;
+  background: rgba(15, 23, 42, 0.75);
+  border: 1px solid rgba(51, 65, 85, 0.4);
+  border-radius: 1rem;
+  padding: 1.25rem;
+  transition: all 0.25s ease;
+}
+.stat-card::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg, transparent 60%, rgba(59,130,246,0.05));
+  pointer-events: none;
+}
+.stat-card:hover {
+  border-color: rgba(59, 130, 246, 0.35);
+  box-shadow: 0 8px 32px -8px rgba(59,130,246,0.12);
+}
+
+/* ===== Animations ===== */
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(16px); }
+  to   { opacity: 1; transform: translateY(0);    }
+}
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes shimmer {
+  0%   { background-position: -200% center; }
+  100% { background-position:  200% center; }
+}
+@keyframes slideInRight {
+  from { opacity: 0; transform: translateX(20px); }
+  to   { opacity: 1; transform: translateX(0);    }
+}
+@keyframes pulse-ring {
+  0%   { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(139,92,246,0.5); }
+  70%  { transform: scale(1);    box-shadow: 0 0 0 10px rgba(139,92,246,0); }
+  100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(139,92,246,0); }
+}
+
+.animate-fade-in-up  { animation: fadeInUp 0.4s ease forwards; }
+.animate-fade-in     { animation: fadeIn   0.3s ease forwards; }
+.animate-slide-right { animation: slideInRight 0.35s ease forwards; }
+
+.shimmer-text {
+  background: linear-gradient(90deg, #94a3b8 0%, #e2e8f0 50%, #94a3b8 100%);
+  background-size: 200% auto;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: shimmer 2.5s linear infinite;
+}
+
+/* ===== Chat Message Bubbles ===== */
+.chat-bubble-agent {
+  background: rgba(30, 27, 75, 0.9);
+  border: 1px solid rgba(99, 102, 241, 0.25);
+  border-radius: 0 1rem 1rem 1rem;
+}
+.chat-bubble-user {
+  background: linear-gradient(135deg, #6d28d9, #7c3aed);
+  border-radius: 1rem 0 1rem 1rem;
+}
+
+/* ===== Landing Page Role Cards ===== */
+.role-card-merchant {
+  background: linear-gradient(135deg, rgba(30,41,98,0.7) 0%, rgba(15,23,42,0.9) 100%);
+  border: 1px solid rgba(59,130,246,0.3);
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.role-card-merchant:hover {
+  border-color: rgba(99,179,237,0.6);
+  box-shadow: 0 20px 60px -15px rgba(59,130,246,0.35);
+  transform: translateY(-4px) scale(1.01);
+}
+
+.role-card-customer {
+  background: linear-gradient(135deg, rgba(46,16,101,0.7) 0%, rgba(15,10,30,0.9) 100%);
+  border: 1px solid rgba(139,92,246,0.3);
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.role-card-customer:hover {
+  border-color: rgba(196,181,253,0.6);
+  box-shadow: 0 20px 60px -15px rgba(139,92,246,0.35);
+  transform: translateY(-4px) scale(1.01);
+}
+
+/* ===== Revenue Chart ===== */
+.chart-bar {
+  transition: height 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* ===== Sidebar Navigation ===== */
+.sidebar-item {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.625rem 0.875rem;
+  border-radius: 0.75rem;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: #94a3b8;
+  transition: all 0.2s ease;
+  cursor: pointer;
+  border: 1px solid transparent;
+}
+.sidebar-item:hover {
+  background: rgba(30,41,59,0.6);
+  color: #e2e8f0;
+}
+.sidebar-item.active {
+  background: rgba(37,99,235,0.15);
+  color: #93c5fd;
+  border-color: rgba(59,130,246,0.25);
+}
+.sidebar-item-customer {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.625rem 0.875rem;
+  border-radius: 0.75rem;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: #a78bfa;
+  transition: all 0.2s ease;
+  cursor: pointer;
+  border: 1px solid transparent;
+}
+.sidebar-item-customer:hover {
+  background: rgba(109,40,217,0.2);
+  color: #ddd6fe;
+}
+.sidebar-item-customer.active {
+  background: rgba(109,40,217,0.2);
+  color: #ddd6fe;
+  border-color: rgba(139,92,246,0.3);
+}
+
+/* ===== Badge Chips ===== */
+.badge-bestseller { background: rgba(251,146,60,0.15); color: #fb923c; border: 1px solid rgba(251,146,60,0.3); }
+.badge-high-margin { background: rgba(52,211,153,0.12); color: #34d399; border: 1px solid rgba(52,211,153,0.25); }
+.badge-low-stock   { background: rgba(248,113,113,0.12); color: #f87171; border: 1px solid rgba(248,113,113,0.25); }
+
+/* ===== Code Block for API Explorer ===== */
+.code-block {
+  background: #0a0e1a;
+  border: 1px solid rgba(51,65,85,0.6);
+  border-radius: 0.75rem;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.75rem;
+  color: #7dd3fc;
+  overflow-x: auto;
 }

@@ -11,6 +11,7 @@ import agentsRoutes from './routes/agents.routes.js';
 import safetyRoutes from './routes/safety.routes.js';
 import ordersRoutes from './routes/orders.routes.js';
 import webhooksRoutes from './routes/webhooks.routes.js';
+import marketplaceRoutes from './routes/marketplace.routes.js';
 
 const app = express();
 
@@ -51,6 +52,7 @@ app.use('/api/orders', ordersRoutes);
 app.use('/api/agents', agentsRoutes);
 app.use('/api/safety', safetyRoutes);
 app.use('/api/webhooks', webhooksRoutes);
+app.use('/api/marketplace', marketplaceRoutes);
 
 // 404 Handler
 app.use((req, res) => {
