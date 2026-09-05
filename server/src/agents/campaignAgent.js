@@ -118,6 +118,23 @@ Output JSON:
       console.warn('Campaign LLM error:', err.message);
     }
 
+    // Ensure couponCode is globally unique in DB to prevent unique constraint failures
+    const ensureUniqueCode = async (baseCode) => {
+      let clean = (baseCode || `PROMO${discountPercent}`).toUpperCase().replace(/[^A-Z0-9_]/g, '');
+      let candidate = clean;
+      let existing = await prisma.campaign.findUnique({ where: { couponCode: candidate } });
+      if (!existing) return candidate;
+
+      for (let i = 0; i < 15; i++) {
+        const suffix = Math.floor(Math.random() * 9000 + 1000);
+        candidate = `${clean}_${suffix}`;
+        existing = await prisma.campaign.findUnique({ where: { couponCode: candidate } });
+        if (!existing) return candidate;
+      }
+      return `${clean}_${Date.now().toString().slice(-6)}`;
+    };
+
+    campaignCode = await ensureUniqueCode(campaignCode);
 
     const intercepted = await safetyService.interceptAction({
       merchantId,
@@ -137,6 +154,9 @@ Output JSON:
         leadProduct: primaryProduct.sku
       },
       executeFn: async () => {
+        // Double check uniqueness right before DB insertion
+        campaignCode = await ensureUniqueCode(campaignCode);
+
         // 1. Create Razorpay Payment Link for the campaign's lead item
         const link = await razorpayService.createPaymentLink({
           amount: discountedPricePaise,
@@ -190,6 +210,9 @@ Output JSON:
       }
     });
 
+    if (intercepted.result) {
+      return { ...intercepted.result, requiresApproval: false };
+    }
     return intercepted;
   }
 }

@@ -1,4 +1,5 @@
 import express from 'express';
+import prisma from '../config/db.js';
 import checkoutAgent from '../agents/checkoutAgent.js';
 import upsellAgent from '../agents/upsellAgent.js';
 import campaignAgent from '../agents/campaignAgent.js';
@@ -103,6 +104,51 @@ router.post('/bundle-checkout', optionalMerchantAuth, async (req, res) => {
     });
 
     return res.json(result);
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * GET /api/agents/campaign/list
+ * Fetch all active and past campaigns for merchant
+ */
+router.get('/campaign/list', optionalMerchantAuth, async (req, res) => {
+  try {
+    const merchantId = req.merchant?.id || null;
+    const where = merchantId ? { merchantId } : {};
+    const campaigns = await prisma.campaign.findMany({
+      where,
+      orderBy: { createdAt: 'desc' }
+    });
+    return res.json({ campaigns });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * POST /api/agents/campaign/:id/end
+ * Ends/deactivates an active campaign and invalidates the coupon code
+ */
+router.post('/campaign/:id/end', optionalMerchantAuth, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const campaign = await prisma.campaign.findUnique({ where: { id } });
+    if (!campaign) {
+      return res.status(404).json({ error: 'Campaign not found' });
+    }
+
+    const updated = await prisma.campaign.update({
+      where: { id },
+      data: { status: 'EXPIRED' }
+    });
+
+    return res.json({
+      success: true,
+      message: `Campaign "${updated.name}" has been ended. Coupon "${updated.couponCode}" is now invalid.`,
+      campaign: updated
+    });
   } catch (err) {
     return res.status(500).json({ error: err.message });
   }

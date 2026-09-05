@@ -10,12 +10,12 @@ import { useAuth } from '../context/AuthContext';
 // Mini sparkline bar chart (CSS only)
 function RevenueChart({ data }) {
   if (!data || data.length === 0) return null;
-  const max = Math.max(...data.map(d => d.revenueInr), 1);
+  const max = Math.max(...data.map(d => Number(d.revenueInr) || 0), 1);
 
   return (
     <div className="flex items-end gap-1 h-16">
       {data.map((d, i) => {
-        const height = Math.max((d.revenueInr / max) * 100, 2);
+        const height = Math.max(((Number(d.revenueInr) || 0) / max) * 100, 2);
         const isToday = i === data.length - 1;
         return (
           <div key={d.date} className="flex-1 flex flex-col items-center gap-1 group relative">
@@ -28,12 +28,12 @@ function RevenueChart({ data }) {
             {/* Tooltip */}
             <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 hidden group-hover:flex flex-col items-center z-10 pointer-events-none">
               <div className="bg-slate-800 border border-slate-700 rounded-lg px-2 py-1 text-[10px] text-white whitespace-nowrap shadow-xl">
-                <div className="font-mono font-bold text-blue-400">₹{d.revenueInr.toLocaleString('en-IN')}</div>
-                <div className="text-slate-400 text-[9px]">{d.date.slice(5)} · {d.orderCount} orders</div>
+                <div className="font-mono font-bold text-blue-400">₹{(Number(d.revenueInr) || 0).toLocaleString('en-IN')}</div>
+                <div className="text-slate-400 text-[9px]">{d.date?.slice(5)} · {d.orderCount || 0} orders</div>
               </div>
               <div className="w-1.5 h-1.5 bg-slate-800 rotate-45 -mt-0.5 border-r border-b border-slate-700" />
             </div>
-            <div className="text-[9px] text-slate-600">{d.date.slice(5)}</div>
+            <div className="text-[9px] text-slate-600">{d.date?.slice(5)}</div>
           </div>
         );
       })}
@@ -167,19 +167,19 @@ export default function Overview({ setActiveTab }) {
         <div className="flex items-center gap-2">
           <button
             onClick={() => setActiveTab('campaigns')}
-            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs shadow-lg shadow-blue-600/30 transition-all"
+            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs shadow-lg shadow-blue-600/30 transition-all cursor-pointer"
           >
             <Sparkles className="w-3.5 h-3.5" /> Run AI Campaign
           </button>
           <button
             onClick={() => setActiveTab('buyer')}
-            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-semibold text-xs transition-all"
+            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-semibold text-xs transition-all cursor-pointer"
           >
             <Bot className="w-3.5 h-3.5 text-sky-400" /> AI Buyer Sim
           </button>
           <button
             onClick={fetchDashboardData}
-            className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition-colors border border-slate-700"
+            className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition-colors border border-slate-700 cursor-pointer"
           >
             <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
           </button>
@@ -190,7 +190,7 @@ export default function Overview({ setActiveTab }) {
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard
           label="Total Revenue (Paid)"
-          value={`₹${totalRevenue.toLocaleString('en-IN')}`}
+          value={`₹${(totalRevenue || 0).toLocaleString('en-IN')}`}
           sub="Razorpay captured"
           icon={DollarSign}
           color="emerald"
@@ -231,7 +231,7 @@ export default function Overview({ setActiveTab }) {
             </div>
             <div className="text-right">
               <div className="text-xs font-mono font-bold text-blue-400">
-                ₹{(revenueByDay.reduce((s, d) => s + d.revenueInr, 0)).toLocaleString('en-IN')}
+                ₹{(revenueByDay.reduce((s, d) => s + (Number(d?.revenueInr) || 0), 0)).toLocaleString('en-IN')}
               </div>
               <div className="text-[10px] text-slate-500">7-day total</div>
             </div>
@@ -256,7 +256,7 @@ export default function Overview({ setActiveTab }) {
               <div className="text-[10px] text-slate-500">Avg Order Value</div>
               <div className="text-sm font-mono font-bold text-white">
                 ₹{metrics?.paidOrdersCount > 0
-                  ? Math.round(totalRevenue / metrics.paidOrdersCount).toLocaleString('en-IN')
+                  ? Math.round((totalRevenue || 0) / metrics.paidOrdersCount).toLocaleString('en-IN')
                   : '0'}
               </div>
             </div>
@@ -331,69 +331,93 @@ export default function Overview({ setActiveTab }) {
         </div>
       </div>
 
-      {/* Recent Orders + Top Products */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      {/* Orders and Top Products Row */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
 
         {/* Recent Orders */}
-        <div className="lg:col-span-2 glass-card rounded-2xl p-5 space-y-4">
-          <h2 className="text-sm font-bold text-white">Recent Transactions</h2>
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs">
-              <thead>
-                <tr className="border-b border-slate-800 text-slate-500 text-[11px] uppercase tracking-wider">
-                  <th className="pb-2.5">Order #</th>
-                  <th className="pb-2.5">Customer</th>
-                  <th className="pb-2.5">Amount</th>
-                  <th className="pb-2.5">Status</th>
-                  <th className="pb-2.5 text-right">Time</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-800/60">
-                {recentOrders.length === 0 ? (
-                  <tr>
-                    <td colSpan="5" className="py-8 text-center text-slate-500">
-                      No orders yet. Open the storefront or simulate an AI buyer.
-                    </td>
+        <div className="lg:col-span-8 glass-card rounded-2xl p-5 space-y-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <ShoppingBag className="w-4 h-4 text-slate-400" />
+              <h2 className="text-sm font-bold text-white">Recent Agent Orders</h2>
+            </div>
+            <button
+              onClick={fetchDashboardData}
+              className="text-xs text-slate-400 hover:text-white flex items-center gap-1 transition-colors cursor-pointer"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} /> Refresh
+            </button>
+          </div>
+
+          {recentOrders.length === 0 ? (
+            <div className="py-12 text-center text-xs text-slate-500">
+              No orders placed yet. Launch a customer storefront session to test autonomous order flow!
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="border-b border-slate-800 text-slate-500 text-left">
+                    <th className="pb-2 font-medium">Order #</th>
+                    <th className="pb-2 font-medium">Customer</th>
+                    <th className="pb-2 font-medium">Items</th>
+                    <th className="pb-2 font-medium">Total</th>
+                    <th className="pb-2 font-medium">Status</th>
+                    <th className="pb-2 font-medium">Action</th>
                   </tr>
-                ) : (
-                  recentOrders.map(order => {
-                    const isPaid = order.status === 'PAID';
-                    const isTimedOut = order.status === 'TIMED_OUT';
+                </thead>
+                <tbody className="divide-y divide-slate-800/40">
+                  {recentOrders.map(order => {
+                    const items = Array.isArray(order.items)
+                      ? order.items
+                      : typeof order.items === 'string'
+                        ? JSON.parse(order.items || '[]')
+                        : [];
+                    const itemCount = items.reduce((s, i) => s + (i.quantity || i.qty || 1), 0);
                     return (
-                      <tr key={order.id} className="hover:bg-slate-800/30 transition-colors">
-                        <td className="py-3 font-mono text-white font-medium">#{order.orderNumber}</td>
-                        <td className="py-3 text-slate-300 max-w-[120px] truncate">
-                          {order.customerName || 'Shopper'}
-                          {order.metadata?.protocol === 'x402' && (
-                            <span className="ml-1 px-1.5 py-0.5 rounded text-[9px] bg-blue-500/20 text-blue-300 font-mono">x402</span>
-                          )}
+                      <tr key={order.id} className="hover:bg-slate-800/20 transition-colors">
+                        <td className="py-3 font-mono text-slate-300 font-semibold">{order.orderNumber}</td>
+                        <td className="py-3 text-white">
+                          <div>{order.customerName || 'Shopper'}</div>
+                          <div className="text-[10px] text-slate-500">{order.customerEmail}</div>
                         </td>
-                        <td className="py-3 font-mono font-semibold text-white">
-                          ₹{order.totalAmountInr?.toLocaleString('en-IN')}
+                        <td className="py-3 text-slate-400">{itemCount} items</td>
+                        <td className="py-3 font-mono font-bold text-white">
+                          ₹{((order.totalAmountInr ?? ((order.totalAmountPaise || 0) / 100)) || 0).toLocaleString('en-IN')}
                         </td>
                         <td className="py-3">
-                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold border ${
-                            isPaid       ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
-                            : isTimedOut ? 'bg-red-500/10 text-red-400 border-red-500/20'
-                                         : 'bg-amber-500/10 text-amber-400 border-amber-500/20'
+                          <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold ${
+                            order.status === 'PAID'
+                              ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                              : 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
                           }`}>
+                            {order.status === 'PAID' ? <CheckCircle className="w-2.5 h-2.5" /> : <Clock className="w-2.5 h-2.5" />}
                             {order.status}
                           </span>
                         </td>
-                        <td className="py-3 text-right text-slate-500 font-mono text-[10px]">
-                          {new Date(order.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        <td className="py-3">
+                          {order.paymentLinkUrl && (
+                            <a
+                              href={order.paymentLinkUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-blue-400 hover:text-blue-300 flex items-center gap-1 text-[11px]"
+                            >
+                              <ExternalLink className="w-3 h-3" /> Pay Link
+                            </a>
+                          )}
                         </td>
                       </tr>
                     );
-                  })
-                )}
-              </tbody>
-            </table>
-          </div>
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
 
         {/* Top Products */}
-        <div className="glass-card rounded-2xl p-5 space-y-4">
+        <div className="lg:col-span-4 glass-card rounded-2xl p-5 space-y-4">
           <div className="flex items-center gap-2">
             <Package className="w-4 h-4 text-slate-400" />
             <h2 className="text-sm font-bold text-white">Top Products</h2>
@@ -405,7 +429,7 @@ export default function Overview({ setActiveTab }) {
           ) : (
             <div className="space-y-2.5">
               {topProducts.map((p, i) => (
-                <div key={p.sku} className="flex items-center gap-3">
+                <div key={p.sku || i} className="flex items-center gap-3">
                   <div className={`w-6 h-6 rounded-lg flex items-center justify-center text-[10px] font-bold shrink-0 ${
                     i === 0 ? 'bg-amber-500/20 text-amber-400' :
                     i === 1 ? 'bg-slate-500/20 text-slate-300' :
@@ -414,11 +438,11 @@ export default function Overview({ setActiveTab }) {
                     {i + 1}
                   </div>
                   <div className="flex-1 min-w-0">
-                    <div className="text-xs font-medium text-white truncate">{p.name}</div>
-                    <div className="text-[10px] text-slate-500">{p.qty} units sold</div>
+                    <div className="text-xs font-medium text-white truncate">{p.name || p.sku}</div>
+                    <div className="text-[10px] text-slate-500">{p.qty || 0} units sold</div>
                   </div>
                   <div className="text-xs font-mono font-bold text-emerald-400 shrink-0">
-                    ₹{p.revenueInr.toLocaleString('en-IN')}
+                    ₹{(Number(p?.revenueInr) || 0).toLocaleString('en-IN')}
                   </div>
                 </div>
               ))}

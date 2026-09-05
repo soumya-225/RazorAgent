@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   Bot, Send, ShoppingCart, Sparkles, ArrowRight, Check, Trash2,
-  Plus, Zap, RefreshCw, Star, Tag, Package, X, ShieldCheck
+  Plus, Zap, RefreshCw, Star, Tag, Package, X, ShieldCheck, AlertCircle
 } from 'lucide-react';
 import api from '../api';
 import RazorpayModal from '../components/RazorpayModal';
@@ -22,6 +22,7 @@ function ProductTile({ product, onAdd, isAdded }) {
     bestseller:   'badge-bestseller',
     'high-margin':'badge-high-margin',
     'low-stock':  'badge-low-stock',
+    'promo-deal': 'bg-rose-500/20 text-rose-400 border border-rose-500/30'
   };
 
   // Gradient backgrounds per category
@@ -35,16 +36,27 @@ function ProductTile({ product, onAdd, isAdded }) {
   const grad = catGradients[product.category] || 'from-violet-900/40 to-slate-900';
 
   return (
-    <div className="product-tile flex flex-col">
+    <div className="product-tile flex flex-col relative group">
       {/* Image area */}
       <div className={`h-32 bg-gradient-to-br ${grad} flex items-center justify-center relative overflow-hidden`}>
         <div className="w-14 h-14 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center">
           <Package className="w-7 h-7 text-slate-400" />
         </div>
+
+        {/* Promo discount badge */}
+        {product.activeCampaign && (
+          <div className="absolute top-2 right-2">
+            <span className="text-[9px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full bg-gradient-to-r from-amber-500 to-rose-500 text-white shadow-lg shadow-rose-500/30 flex items-center gap-1 animate-pulse">
+              <Zap className="w-2.5 h-2.5 fill-white" />
+              {product.activeCampaign.discountPercent}% OFF
+            </span>
+          </div>
+        )}
+
         {/* Badges */}
         {product.badges?.length > 0 && (
           <div className="absolute top-2 left-2 flex flex-col gap-1">
-            {product.badges.slice(0, 2).map(b => (
+            {product.badges.filter(b => b !== 'promo-deal').slice(0, 2).map(b => (
               <span key={b} className={`text-[9px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full ${badgeStyles[b]}`}>
                 {b.replace('-', ' ')}
               </span>
@@ -69,10 +81,28 @@ function ProductTile({ product, onAdd, isAdded }) {
 
         <div className="flex items-center justify-between mt-auto">
           <div>
-            <div className="text-base font-extrabold font-mono text-white">
-              ₹{product.priceInr.toLocaleString('en-IN')}
-            </div>
-            <div className="text-[10px] text-slate-500">{product.inventory} in stock</div>
+            {product.activeCampaign ? (
+              <div>
+                <div className="flex items-baseline gap-1.5">
+                  <span className="text-base font-extrabold font-mono text-emerald-400">
+                    ₹{Number(product.activeCampaign.discountedPriceInr || product.priceInr || 0).toLocaleString('en-IN')}
+                  </span>
+                  <span className="text-xs line-through text-slate-500 font-mono">
+                    ₹{Number(product.priceInr || 0).toLocaleString('en-IN')}
+                  </span>
+                </div>
+                <div className="text-[9px] text-amber-400 font-mono flex items-center gap-0.5 mt-0.5">
+                  <Tag className="w-2.5 h-2.5" /> Code: {product.activeCampaign.couponCode}
+                </div>
+              </div>
+            ) : (
+              <div>
+                <div className="text-base font-extrabold font-mono text-white">
+                  ₹{product.priceInr.toLocaleString('en-IN')}
+                </div>
+                <div className="text-[10px] text-slate-500">{product.inventory} in stock</div>
+              </div>
+            )}
           </div>
           <button
             onClick={handleAdd}
@@ -122,6 +152,8 @@ export default function CustomerStorefront() {
   const [loadingUpsell, setLoadingUpsell] = useState(false);
   const [couponCode, setCouponCode] = useState('');
   const [appliedCoupon, setAppliedCoupon] = useState(null);
+  const [couponError, setCouponError] = useState(null);
+  const [couponSuccess, setCouponSuccess] = useState(null);
   const [checkoutOrder, setCheckoutOrder] = useState(null);
   const [isPayModalOpen, setIsPayModalOpen] = useState(false);
   const [approvalRequest, setApprovalRequest] = useState(null);
@@ -134,11 +166,6 @@ export default function CustomerStorefront() {
 
   // Initialize greeting
   useEffect(() => {
-    setMessages([{
-      role: 'assistant',
-      content: `👋 Hi **${customerName}**! I'm your AI shopping assistant. I know your preferences and can complete checkout automatically for orders under **₹${autopayThreshold.toLocaleString('en-IN')}** — no extra steps!\n\nBrowse the catalog on the left, or just tell me what you're looking for. 🛍️`,
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-    }]);
     fetchCatalog();
   }, []);
 
@@ -158,12 +185,33 @@ export default function CustomerStorefront() {
   const fetchCatalog = async () => {
     try {
       const res = await api.get('/api/marketplace/catalog');
-      // marketplace catalog returns priceInr directly
-      setProducts(res.data?.catalog || []);
+      const catalogList = res.data?.catalog || [];
+      const activeCamps = res.data?.activeCampaigns || [];
+      setProducts(catalogList);
+
+      // Build greeting with active discount awareness
+      let greeting = `👋 Hi **${customerName}**! I'm your AI shopping assistant. I know your preferences and can complete checkout automatically for orders under **₹${autopayThreshold.toLocaleString('en-IN')}** — no extra steps!`;
+      
+      const discountedItems = catalogList.filter(p => p.activeCampaign);
+      if (discountedItems.length > 0) {
+        greeting += `\n\n🔥 **Active Deals Live Now**: We have special discounts on ${discountedItems.slice(0, 2).map(d => `**${d.name}** (${d.activeCampaign.discountPercent}% OFF with code \`${d.activeCampaign.couponCode}\`)`).join(', ')}!`;
+      }
+      greeting += `\n\nBrowse the catalog on the left, or ask me for recommendations or deals. 🛍️`;
+
+      setMessages([{
+        role: 'assistant',
+        content: greeting,
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      }]);
     } catch {
       try {
         const res = await api.get('/api/products?inStock=true');
         setProducts(res.data?.products || []);
+        setMessages([{
+          role: 'assistant',
+          content: `👋 Hi **${customerName}**! I'm your AI shopping assistant. How can I help you today? 🛍️`,
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        }]);
       } catch (e) {
         console.error('Failed to load catalog:', e);
       }
@@ -198,6 +246,10 @@ export default function CustomerStorefront() {
       setCart(cart.map(i => i.id === product.id ? { ...i, qty: i.qty + 1 } : i));
     } else {
       setCart([...cart, { ...product, qty: 1 }]);
+    }
+    // If product has an active campaign and no coupon currently applied, auto-fill coupon
+    if (product.activeCampaign && !appliedCoupon) {
+      handleApplyCoupon(product.activeCampaign.couponCode);
     }
     setCartOpen(true); // auto-open cart panel
   };
@@ -234,29 +286,31 @@ export default function CustomerStorefront() {
           amountInr: res.data.amountInr,
           agentName: 'CHECKOUT_AGENT',
           actionType: 'create_order',
-          reasoning: res.data.message
+          explanation: res.data.message || 'Order requires merchant approval',
+          status: 'PENDING'
         });
         setIsApprovalModalOpen(true);
-        addMessage('assistant', `🛡️ **Approval Required**: This order of **₹${res.data.amountInr?.toLocaleString('en-IN')}** exceeds the merchant's automated threshold. A sign-off request has been raised.`);
+        addMessage('assistant', `⚠️ Order for **₹${res.data.amountInr.toLocaleString('en-IN')}** exceeded the threshold. A merchant approval request has been created.`);
         return;
       }
 
-      const orderResult = res.data?.result;
-      if (orderResult) {
-        setCheckoutOrder(orderResult);
-        setIsPayModalOpen(true);
-        addMessage('assistant', `✅ Order **#${orderResult.orderNumber}** created for **₹${orderResult.totalAmountInr?.toLocaleString('en-IN')}**! Complete your payment in the window.`);
-      }
+      setCheckoutOrder(res.data);
+      setIsPayModalOpen(true);
+
+      const discountMsg = res.data.discountAmountInr > 0 ? ` (Discount applied: ₹${res.data.discountAmountInr})` : '';
+      addMessage('assistant', `🛒 Order **#${res.data.orderNumber}** created for **₹${res.data.totalAmountInr.toLocaleString('en-IN')}**${discountMsg}. Opening Razorpay payment window...`);
     } catch (err) {
-      addMessage('assistant', `⚠️ Checkout failed: ${err.response?.data?.message || err.message}`);
+      const isSafetyBlock = err.response?.data?.code === 'SAFETY_BLOCKED';
+      const errMsg = err.response?.data?.error || err.message;
+      addMessage('assistant', `⚠️ Checkout failed: ${errMsg}`);
     } finally {
       setLoadingChat(false);
     }
   };
 
-  const addMessage = (role, content) => {
+  const addMessage = (role, content, action = null) => {
     setMessages(prev => [...prev, {
-      role, content,
+      role, content, action,
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     }]);
   };
@@ -289,6 +343,11 @@ export default function CustomerStorefront() {
         role: 'assistant', content: reply, action,
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
       }]);
+
+      // If chat returned a coupon, automatically apply it
+      if (action?.coupon) {
+        await handleApplyCoupon(action.coupon);
+      }
 
       if (action?.intent === 'CHECKOUT') {
         let checkoutItems = [];
@@ -334,29 +393,80 @@ export default function CustomerStorefront() {
     }
   };
 
+  const extractSkusList = (targetSkus) => {
+    if (!targetSkus) return [];
+    if (Array.isArray(targetSkus)) {
+      return targetSkus.map(item => {
+        if (typeof item === 'string') return item.toUpperCase();
+        if (item && typeof item === 'object') return (item.sku || item.id || '').toUpperCase();
+        return '';
+      }).filter(Boolean);
+    }
+    if (typeof targetSkus === 'string') {
+      try {
+        const parsed = JSON.parse(targetSkus);
+        return extractSkusList(parsed);
+      } catch {
+        return [targetSkus.toUpperCase()];
+      }
+    }
+    return [];
+  };
+
   const handleApplyCoupon = async (codeToApply) => {
     const code = (codeToApply || couponCode).trim().toUpperCase();
     if (!code) return;
+    setCouponError(null);
+    setCouponSuccess(null);
     try {
       const res = await api.get(`/api/products/coupon/${encodeURIComponent(code)}`);
-      setAppliedCoupon({ code: res.data.code, discountPercent: res.data.discountPercent });
+      const targetSkus = extractSkusList(res.data.targetSkus);
+      setAppliedCoupon({
+        code: res.data.code,
+        discountPercent: res.data.discountPercent,
+        targetSkus,
+        description: res.data.description
+      });
       setCouponCode(res.data.code);
-    } catch {
-      setAppliedCoupon({ code, discountPercent: 10 });
+      setCouponSuccess(`Coupon ${res.data.code} applied (${res.data.discountPercent}% OFF)!`);
+      return res.data;
+    } catch (err) {
+      setAppliedCoupon(null);
+      const msg = err.response?.data?.error || `Coupon "${code}" is invalid or expired.`;
+      setCouponError(msg);
+      return null;
     }
   };
 
   const rawTotal = cart.reduce((s, i) => s + i.priceInr * i.qty, 0);
-  const discount = appliedCoupon ? rawTotal * (appliedCoupon.discountPercent / 100) : 0;
+
+  // Calculate discount ONLY on eligible items matching the coupon's targetSkus
+  let discount = 0;
+  let eligibleItemsCount = 0;
+  if (appliedCoupon) {
+    const targeted = appliedCoupon.targetSkus || [];
+    if (targeted.length > 0) {
+      const eligibleTotal = cart
+        .filter(i => targeted.includes((i.sku || '').toUpperCase()) || targeted.includes((i.id || '').toUpperCase()))
+        .reduce((s, i) => {
+          eligibleItemsCount++;
+          return s + i.priceInr * i.qty;
+        }, 0);
+      discount = eligibleTotal * (appliedCoupon.discountPercent / 100);
+    } else {
+      discount = rawTotal * (appliedCoupon.discountPercent / 100);
+      eligibleItemsCount = cart.length;
+    }
+  }
   const finalTotal = Math.max(0, rawTotal - discount);
   const cartCount = cart.reduce((s, i) => s + i.qty, 0);
   const isAutopay = autopayThreshold > 0 && finalTotal <= autopayThreshold && finalTotal > 0;
 
   const QUICK_PROMPTS = [
+    'What discounts and deals are running?',
     'Show me wireless headphones',
-    'Best gaming accessories',
+    'Best gaming accessories under ₹50,000',
     'Recommend accessories for my cart',
-    'Apply coupon WELCOME10',
     'What are your bestsellers?',
   ];
 
@@ -369,8 +479,28 @@ export default function CustomerStorefront() {
           <Package className="w-4 h-4 text-violet-400" />
         </div>
         <div className="flex-1 min-w-0">
-          <div className="text-[11px] font-bold text-white truncate">{product.name}</div>
-          <div className="text-[10px] text-violet-300 font-mono">₹{Number(product.priceInr).toLocaleString('en-IN')}</div>
+          <div className="text-[11px] font-bold text-white truncate flex items-center gap-1.5">
+            {product.name}
+            {product.activeCampaign && (
+              <span className="text-[9px] bg-rose-500/20 text-rose-300 border border-rose-500/30 px-1.5 py-0.2 rounded-full font-bold">
+                -{product.activeCampaign.discountPercent}%
+              </span>
+            )}
+          </div>
+          {product.activeCampaign ? (
+            <div className="flex items-baseline gap-1">
+              <span className="text-[10px] text-emerald-400 font-mono font-bold">
+                ₹{Number(product.activeCampaign.discountedPriceInr).toLocaleString('en-IN')}
+              </span>
+              <span className="text-[9px] line-through text-slate-500 font-mono">
+                ₹{Number(product.priceInr).toLocaleString('en-IN')}
+              </span>
+            </div>
+          ) : (
+            <div className="text-[10px] text-violet-300 font-mono">
+              ₹{Number(product.priceInr).toLocaleString('en-IN')}
+            </div>
+          )}
           <div className="text-[9px] text-slate-500">{product.category}</div>
         </div>
         <button
@@ -481,7 +611,7 @@ export default function CustomerStorefront() {
             <button
               key={p}
               onClick={() => setInputMessage(p)}
-              className="px-3 py-1.5 rounded-full bg-violet-900/30 border border-violet-900/40 text-violet-300 text-[11px] whitespace-nowrap hover:bg-violet-800/40 hover:border-violet-500/40 transition-all shrink-0"
+              className="px-3 py-1.5 rounded-full bg-violet-900/30 border border-violet-900/40 text-violet-300 text-[11px] whitespace-nowrap hover:bg-violet-800/40 hover:border-violet-500/40 transition-all shrink-0 cursor-pointer"
             >
               {p}
             </button>
@@ -502,7 +632,7 @@ export default function CustomerStorefront() {
             type="text"
             value={inputMessage}
             onChange={e => setInputMessage(e.target.value)}
-            placeholder="Ask about products, get recommendations, or say 'checkout'..."
+            placeholder="Ask about products, deals, discounts, or say 'checkout'..."
             className="flex-1 px-4 py-2.5 rounded-xl bg-violet-950/60 border border-violet-900/40 text-sm text-white placeholder:text-slate-600 focus:outline-none focus:border-violet-500 transition-colors"
           />
           <button
@@ -568,31 +698,59 @@ export default function CustomerStorefront() {
                 ))}
               </div>
 
-              {/* Coupon */}
-              <div className="flex gap-1.5">
-                <div className="relative flex-1">
-                  <Tag className="w-3.5 h-3.5 text-slate-600 absolute left-3 top-2.5" />
-                  <input
-                    type="text"
-                    placeholder="Coupon code"
-                    value={couponCode}
-                    onChange={e => setCouponCode(e.target.value)}
-                    className="w-full pl-8 pr-2 py-2 rounded-xl bg-violet-950/60 border border-violet-900/40 text-[11px] text-white uppercase font-mono focus:outline-none focus:border-violet-500"
-                  />
+              {/* Coupon input */}
+              <div className="space-y-1.5">
+                <div className="flex gap-1.5">
+                  <div className="relative flex-1">
+                    <Tag className="w-3.5 h-3.5 text-slate-600 absolute left-3 top-2.5" />
+                    <input
+                      type="text"
+                      placeholder="Coupon code"
+                      value={couponCode}
+                      onChange={e => { setCouponCode(e.target.value); setCouponError(null); }}
+                      className="w-full pl-8 pr-2 py-2 rounded-xl bg-violet-950/60 border border-violet-900/40 text-[11px] text-white uppercase font-mono focus:outline-none focus:border-violet-500"
+                    />
+                  </div>
+                  <button
+                    onClick={() => handleApplyCoupon()}
+                    className="px-3 rounded-xl bg-violet-800/50 hover:bg-violet-700/60 text-violet-300 text-[11px] font-semibold border border-violet-800/60 transition-all cursor-pointer"
+                  >
+                    Apply
+                  </button>
                 </div>
-                <button
-                  onClick={() => handleApplyCoupon()}
-                  className="px-3 rounded-xl bg-violet-800/50 hover:bg-violet-700/60 text-violet-300 text-[11px] font-semibold border border-violet-800/60 transition-all"
-                >
-                  Apply
-                </button>
+
+                {/* Coupon Feedback Alerts */}
+                {couponError && (
+                  <div className="px-3 py-1.5 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-[10px] flex items-center justify-between animate-fadeIn">
+                    <span className="flex items-center gap-1.5"><AlertCircle className="w-3 h-3 shrink-0" /> {couponError}</span>
+                    <button onClick={() => setCouponError(null)} className="text-red-400 hover:text-white">✕</button>
+                  </div>
+                )}
+
+                {appliedCoupon && (
+                  <div className="space-y-1">
+                    <div className="px-3 py-2 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-between text-[11px] animate-fadeIn">
+                      <span className="text-emerald-400 font-mono flex items-center gap-1.5">
+                        <Check className="w-3 h-3" /> {appliedCoupon.code}
+                      </span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-emerald-400 font-bold">-{appliedCoupon.discountPercent}% OFF</span>
+                        <button onClick={() => { setAppliedCoupon(null); setCouponCode(''); setCouponSuccess(null); }} className="text-slate-500 hover:text-red-400 text-[10px]">✕</button>
+                      </div>
+                    </div>
+                    {appliedCoupon.targetSkus?.length > 0 && eligibleItemsCount === 0 && (
+                      <div className="text-[10px] text-amber-400/90 bg-amber-500/10 border border-amber-500/20 rounded-lg px-2.5 py-1 leading-tight">
+                        Valid on: {appliedCoupon.targetSkus.join(', ')}. Add eligible items to cart to get this discount.
+                      </div>
+                    )}
+                    {appliedCoupon.targetSkus?.length > 0 && eligibleItemsCount > 0 && eligibleItemsCount < cart.length && (
+                      <div className="text-[9px] text-emerald-400/80 px-1">
+                        Applied to {eligibleItemsCount} eligible item{eligibleItemsCount > 1 ? 's' : ''} in cart.
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
-              {appliedCoupon && (
-                <div className="px-3 py-2 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-between text-[11px]">
-                  <span className="text-emerald-400 font-mono">{appliedCoupon.code}</span>
-                  <span className="text-emerald-400 font-bold">-{appliedCoupon.discountPercent}%</span>
-                </div>
-              )}
 
               {/* Total */}
               <div className="space-y-1.5 pt-2 border-t border-violet-900/30">
@@ -638,114 +796,110 @@ export default function CustomerStorefront() {
                 )}
               </div>
 
-              {upsellData.recommendations.map((rec, i) => {
-                const isUpsell = rec.type === 'UPSELL';
-                const isAdded = cart.some(c => c.sku === rec.sku);
-                return (
-                  <div key={rec.sku || i} className={`p-3 rounded-xl border transition-all ${
-                    isUpsell
-                      ? 'bg-gradient-to-br from-amber-950/40 to-orange-950/40 border-amber-500/25 hover:border-amber-500/50'
-                      : 'bg-violet-900/10 border-violet-900/25 hover:border-violet-500/30'
-                  }`}>
-                    <div className="flex items-start gap-2">
-                      {/* Type badge */}
-                      <span className={`shrink-0 mt-0.5 text-[8px] font-bold px-1.5 py-0.5 rounded-full uppercase tracking-wide ${
-                        isUpsell
-                          ? 'bg-amber-500/20 text-amber-400'
-                          : 'bg-violet-500/20 text-violet-400'
+              {/* Upsell / Cross-sell Cards */}
+              {upsellData.recommendations.map(rec => (
+                <div
+                  key={rec.sku}
+                  className={`p-2.5 rounded-xl border transition-all ${
+                    rec.type === 'UPSELL'
+                      ? 'bg-amber-950/20 border-amber-500/30 hover:border-amber-500/50'
+                      : 'bg-violet-950/30 border-violet-800/30 hover:border-violet-600/50'
+                  }`}
+                >
+                  <div className="flex items-start justify-between gap-1 mb-1">
+                    <div>
+                      <span className={`text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-full ${
+                        rec.type === 'UPSELL'
+                          ? 'bg-amber-500/20 text-amber-300'
+                          : 'bg-violet-500/20 text-violet-300'
                       }`}>
-                        {isUpsell ? '↑ Upsell' : '+ Cross-sell'}
+                        {rec.type === 'UPSELL' ? '⚡ UPSELL' : '✨ CROSS-SELL'}
                       </span>
-                      <div className="flex-1 min-w-0">
-                        <div className="text-xs font-bold text-white truncate">{rec.name}</div>
-                        <div className="text-[10px] font-mono text-slate-400 mb-1">₹{rec.priceInr?.toLocaleString('en-IN')}</div>
-                        {/* LLM-generated pitch */}
-                        {rec.pitch && (
-                          <p className={`text-[10px] leading-relaxed italic ${isUpsell ? 'text-amber-200/70' : 'text-violet-200/70'}`}>
-                            "{rec.pitch}"
-                          </p>
-                        )}
-                      </div>
+                      <div className="text-xs font-bold text-white mt-1 leading-tight">{rec.name}</div>
+                    </div>
+                    <span className="text-xs font-mono font-bold text-emerald-400 shrink-0">
+                      ₹{rec.priceInr.toLocaleString('en-IN')}
+                    </span>
+                  </div>
+                  {rec.pitch && (
+                    <p className="text-[10px] text-slate-400 leading-relaxed mb-2 italic">
+                      "{rec.pitch}"
+                    </p>
+                  )}
+                  <button
+                    onClick={() => addToCart({ id: rec.id, sku: rec.sku, name: rec.name, priceInr: rec.priceInr, category: rec.category })}
+                    className="w-full py-1 rounded-lg bg-violet-600/40 hover:bg-violet-600 text-white text-[10px] font-bold transition-all flex items-center justify-center gap-1 cursor-pointer"
+                  >
+                    <Plus className="w-3 h-3" /> Add to Cart
+                  </button>
+                </div>
+              ))}
+
+              {/* Bundle Offer Card */}
+              {upsellData.bundleOffer && (
+                <div className="p-3 rounded-xl bg-gradient-to-br from-indigo-950/80 to-purple-950/80 border border-indigo-500/40 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-bold text-indigo-300 flex items-center gap-1">
+                      <Sparkles className="w-3 h-3 text-indigo-400" /> Bundle & Save
+                    </span>
+                    <span className="text-[10px] font-bold font-mono text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded-full">
+                      -{upsellData.bundleOffer.bundleDiscountPercent}% OFF
+                    </span>
+                  </div>
+                  <p className="text-[10px] text-slate-300 leading-relaxed">
+                    {upsellData.bundleOffer.explanation}
+                  </p>
+                  <div className="flex items-center justify-between pt-1 border-t border-indigo-500/20 text-[11px]">
+                    <div>
+                      <span className="line-through text-slate-500 font-mono mr-1.5">
+                        ₹{upsellData.bundleOffer.originalTotalInr.toLocaleString('en-IN')}
+                      </span>
+                      <span className="font-extrabold font-mono text-emerald-400">
+                        ₹{upsellData.bundleOffer.bundleTotalInr.toLocaleString('en-IN')}
+                      </span>
+                    </div>
+                    <span className="text-[10px] text-indigo-300 font-semibold">
+                      Save ₹{upsellData.bundleOffer.savingsInr.toLocaleString('en-IN')}
+                    </span>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Complementary Products */}
+          {complementaryProducts.length > 0 && (
+            <div className="space-y-2 pt-2 border-t border-violet-900/20">
+              <div className="text-[11px] text-slate-500 font-semibold uppercase tracking-wider">
+                Complementary Add-ons
+              </div>
+              <div className="space-y-1.5">
+                {complementaryProducts.map(p => (
+                  <div key={p.id} className="flex items-center justify-between p-2 rounded-xl bg-violet-950/40 border border-violet-900/30">
+                    <div className="min-w-0 flex-1">
+                      <div className="text-[11px] font-semibold text-white truncate">{p.name}</div>
+                      <div className="text-[10px] font-mono text-violet-300">₹{p.priceInr.toLocaleString('en-IN')}</div>
                     </div>
                     <button
-                      onClick={() => {
-                        const fullProd = products.find(p => p.sku === rec.sku) || { ...rec, id: rec.id, qty: 1 };
-                        addToCart(fullProd);
-                      }}
-                      disabled={isAdded}
-                      className={`mt-2 w-full py-1.5 rounded-lg text-[10px] font-bold flex items-center justify-center gap-1 transition-all cursor-pointer ${
-                        isAdded
-                          ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 cursor-default'
-                          : isUpsell
-                            ? 'bg-amber-600 hover:bg-amber-500 text-white shadow-md shadow-amber-600/20'
-                            : 'bg-violet-600 hover:bg-violet-500 text-white shadow-md shadow-violet-600/20'
-                      }`}
+                      onClick={() => addToCart(p)}
+                      className="ml-2 p-1.5 rounded-lg bg-violet-600/50 hover:bg-violet-600 text-white text-[10px] font-bold transition-all shrink-0 cursor-pointer"
                     >
-                      {isAdded ? <><Check className="w-3 h-3" /> Added</> : <><Plus className="w-3 h-3" /> Add to Cart</>}
+                      <Plus className="w-3 h-3" />
                     </button>
                   </div>
-                );
-              })}
-            </div>
-          )}
-
-          {/* ---- Bundle Offer CTA ---- */}
-          {upsellData?.bundleOffer && (
-            <div className="rounded-2xl bg-gradient-to-br from-indigo-950/70 to-violet-950/70 border border-indigo-500/25 p-4 space-y-3 animate-slide-right">
-              <div className="flex items-center gap-2">
-                <Sparkles className="w-4 h-4 text-indigo-400" />
-                <span className="text-xs font-bold text-white">Bundle Deal</span>
-                <span className="ml-auto text-[9px] font-bold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full">
-                  Save ₹{upsellData.bundleOffer.savingsInr?.toLocaleString('en-IN')}
-                </span>
+                ))}
               </div>
-              <p className="text-[11px] text-indigo-200 leading-relaxed">{upsellData.bundleOffer.explanation}</p>
-              <div className="p-2.5 rounded-xl bg-slate-950/60 border border-indigo-500/20 flex items-center justify-between">
-                <div>
-                  <div className="text-[10px] text-slate-500">Bundle total</div>
-                  <div className="text-sm font-bold font-mono text-white">₹{upsellData.bundleOffer.bundleTotalInr?.toLocaleString('en-IN')}</div>
-                </div>
-                <div className="text-right">
-                  <div className="text-[10px] text-slate-500 line-through">₹{upsellData.bundleOffer.originalTotalInr?.toLocaleString('en-IN')}</div>
-                  <div className="text-[10px] font-bold text-emerald-400">{upsellData.bundleOffer.bundleDiscountPercent}% OFF</div>
-                </div>
-              </div>
-              <button
-                onClick={() => {
-                  if (upsellData.bundleOffer.recommendation) {
-                    const fullProd = products.find(p => p.sku === upsellData.bundleOffer.recommendation.sku)
-                      || upsellData.bundleOffer.recommendation;
-                    addToCart(fullProd);
-                  }
-                }}
-                className="w-full py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-md shadow-indigo-600/20"
-              >
-                <Plus className="w-3.5 h-3.5" /> Add Bundle & Save
-              </button>
             </div>
           )}
-
-          {/* No recommendations state */}
-          {upsellData && !upsellData.recommendations?.length && !upsellData.bundleOffer && (
-            <div className="text-center py-3 text-[11px] text-slate-500 italic">
-              Your cart is already well-optimised! 🎯
-            </div>
-          )}
-
         </div>
       </div>
-
-      {/* Cart overlay (mobile) */}
-      {cartOpen && (
-        <div className="fixed inset-0 z-30 bg-black/60 lg:hidden" onClick={() => setCartOpen(false)} />
-      )}
 
       {/* Razorpay Modal */}
       <RazorpayModal
         isOpen={isPayModalOpen}
         onClose={() => setIsPayModalOpen(false)}
         order={checkoutOrder}
-        onSuccess={() => { setCart([]); setAppliedCoupon(null); setCouponCode(''); }}
+        onSuccess={() => { setCart([]); setAppliedCoupon(null); setCouponCode(''); setCouponSuccess(null); }}
       />
 
       {/* Approval Modal */}
@@ -756,8 +910,9 @@ export default function CustomerStorefront() {
         onDecisionComplete={(decision) => {
           setIsApprovalModalOpen(false);
           addMessage('assistant', decision === 'APPROVED'
-            ? '✅ Merchant approved the transaction. Your payment link has been sent.'
-            : '❌ Transaction rejected by merchant. Please contact support.');
+            ? '✅ Merchant approved the order! Please complete payment via the Razorpay link.'
+            : '❌ Order was rejected by the merchant.'
+          );
         }}
       />
     </div>
