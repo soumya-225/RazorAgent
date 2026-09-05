@@ -5,6 +5,8 @@ import upsellAgent from '../agents/upsellAgent.js';
 import campaignAgent from '../agents/campaignAgent.js';
 import buyerAgent from '../agents/buyerAgent.js';
 import { optionalMerchantAuth, requireMerchantAuth } from '../middleware/auth.middleware.js';
+import razorpayService from '../services/razorpayService.js';
+import config from '../config/env.js';
 
 const router = express.Router();
 
@@ -14,7 +16,7 @@ const router = express.Router();
  */
 router.post('/chat', optionalMerchantAuth, async (req, res) => {
   try {
-    const { message, sessionId = 'chat_session', history = [], cart = [] } = req.body;
+    const { message, sessionId = 'chat_session', history = [], cart = [], checkoutMode = 'standard', hasSbmdToken = false } = req.body;
     const merchantId = req.merchant?.id || null;
 
     if (!message) {
@@ -26,10 +28,70 @@ router.post('/chat', optionalMerchantAuth, async (req, res) => {
       sessionId,
       userMessage: message,
       conversationHistory: history,
-      cart
+      cart,
+      checkoutMode,
+      hasSbmdToken
     });
 
     return res.json(response);
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * POST /api/agents/sbmd/create-customer
+ * Create a Razorpay Customer and a ₹1 recurring-capable order for one-time setup
+ */
+router.post('/sbmd/create-customer', async (req, res) => {
+  try {
+    const { name, email, contact } = req.body;
+    const customer = await razorpayService.createCustomer({
+      name: name || 'Demo Shopper',
+      email: email || 'shopper@razoragent.demo',
+      contact: contact || '+919876543210'
+    });
+
+    // Create a ₹1 Razorpay order for the one-time card-save authorization
+    const order = await razorpayService.createOrder({
+      amount: 100, // ₹1 in paise
+      currency: 'INR',
+      receipt: `sbmd_setup_${Date.now()}`,
+      notes: { purpose: 'frictionless_setup', customerId: customer.id }
+    });
+
+    return res.json({
+      customerId: customer.id,
+      orderId: order.id,
+      keyId: config.razorpayKeyId || 'rzp_test_sandbox',
+      amount: order.amount,
+      isSandbox: order.isSandbox || customer.isSandbox
+    });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * POST /api/agents/sbmd/fetch-token
+ * Fetch the saved recurring token for a customer after checkout setup
+ */
+router.post('/sbmd/fetch-token', async (req, res) => {
+  try {
+    const { customerId } = req.body;
+    if (!customerId) return res.status(400).json({ error: 'customerId is required' });
+
+    const tokens = await razorpayService.fetchCustomerTokens(customerId);
+    const token = tokens[0];
+    if (!token) {
+      return res.status(404).json({ error: 'No token found for this customer' });
+    }
+
+    return res.json({
+      tokenId: token.id,
+      customerId,
+      method: token.method || 'card'
+    });
   } catch (err) {
     return res.status(500).json({ error: err.message });
   }
@@ -41,7 +103,7 @@ router.post('/chat', optionalMerchantAuth, async (req, res) => {
  */
 router.post('/checkout', optionalMerchantAuth, async (req, res) => {
   try {
-    const { items, customer, couponCode, sessionId = 'checkout_session' } = req.body;
+    const { items, customer, couponCode, sessionId = 'checkout_session', sbmdToken } = req.body;
     const merchantId = req.merchant?.id || null;
 
     const result = await checkoutAgent.createOrder({
@@ -50,6 +112,7 @@ router.post('/checkout', optionalMerchantAuth, async (req, res) => {
       items,
       customer,
       couponCode,
+      sbmdToken: sbmdToken || null,
       explanation: 'Customer placed order via RazorAgent Checkout'
     });
 

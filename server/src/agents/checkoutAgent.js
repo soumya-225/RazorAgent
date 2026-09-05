@@ -1,5 +1,6 @@
 import prisma from '../config/db.js';
 import razorpayService from '../services/razorpayService.js';
+import sbmdService from '../services/sbmdService.js';
 import safetyService from '../services/safetyService.js';
 import merchantRegistryService from '../services/merchantRegistryService.js';
 import { callLLM } from './llmClient.js';
@@ -115,6 +116,7 @@ export class CheckoutAgent {
     items = [],
     customer = {},
     couponCode = null,
+    sbmdToken = null,
     explanation = 'Customer initiated checkout'
   }) {
     if (!items || items.length === 0) {
@@ -248,6 +250,40 @@ export class CheckoutAgent {
           }
         });
 
+        // If sbmdToken is provided, execute frictionless payment immediately
+        if (sbmdToken) {
+          try {
+            const sbmdResult = await sbmdService.executePayment({
+              orderId: savedOrder.id,
+              razorpayOrderId: rzpOrder.id,
+              amountPaise: finalAmountPaise,
+              merchantId: resolvedMerchantId,
+              sbmdToken,
+              customer
+            });
+
+            return {
+              orderId: savedOrder.id,
+              orderNumber: savedOrder.orderNumber,
+              razorpayOrderId: rzpOrder.id,
+              totalAmountInr: finalAmountPaise / 100,
+              totalAmountPaise: finalAmountPaise,
+              discountAmountInr: discountPaise / 100,
+              paymentLinkUrl: rzpLink.short_url,
+              paymentLinkId: rzpLink.id,
+              items: orderItems,
+              status: 'PAID',
+              isSandbox: sbmdResult.isSandbox,
+              sbmdPayment: true,
+              sbmdMessage: sbmdResult.message,
+              sbmdPaymentId: sbmdResult.paymentId
+            };
+          } catch (sbmdErr) {
+            if (sbmdErr.name === 'SpendingCapExceeded') throw sbmdErr;
+            console.warn('SBMD payment failed, returning standard order:', sbmdErr.message);
+          }
+        }
+
         return {
           orderId: savedOrder.id,
           orderNumber: savedOrder.orderNumber,
@@ -274,7 +310,7 @@ export class CheckoutAgent {
   /**
    * Process incoming user chat message in conversational checkout
    */
-  async processUserMessage({ merchantId, sessionId, userMessage, conversationHistory = [], cart = [] }) {
+  async processUserMessage({ merchantId, sessionId, userMessage, conversationHistory = [], cart = [], checkoutMode = 'standard', hasSbmdToken = false }) {
     const [merchants, products, activeCampaigns] = await Promise.all([
       merchantRegistryService.getAllMerchants(),
       prisma.product.findMany({ where: { inStock: true }, take: 40 }),
@@ -312,8 +348,16 @@ export class CheckoutAgent {
         }).join('\n')
       : 'No active promotional campaigns currently.';
 
-    const systemPrompt = `You are RazorAgent's Conversational Shopping Agent for a marketplace.
+    const frictionlessContext = (checkoutMode === 'sbmd' && hasSbmdToken)
+      ? `\n=== PAYMENT MODE: FRICTIONLESS (SBMD) ===
+The customer has enabled frictionless checkout with a saved payment token.
+- When confirming a purchase, say something like: "⚡ Processing your order instantly via your saved token..." or "⚡ Auto-checkout triggered — no checkout page needed."
+- NEVER say "Opening Razorpay", "payment window", "complete payment in the modal", or any language implying the customer needs to do anything. Payment is fully automatic.
+- Keep it short: one sentence confirming the item and that it's being processed instantly.\n`
+      : '';
 
+    const systemPrompt = `You are RazorAgent's Conversational Shopping Agent for a marketplace.
+${frictionlessContext}
 === CRITICAL RULES (NEVER VIOLATE) ===
 1. You MUST only recommend products that exist EXACTLY in the catalog below. Never invent, hallucinate, or suggest products not listed.
 2. DO NOT write out lists, bullet points of products, or verbose descriptions of product specs/prices in your text response. The frontend automatically renders interactive product cards with direct Add-to-Cart buttons, prices, and discount badges below your message based on the ACTION recommendedSkus.

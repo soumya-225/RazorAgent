@@ -69,17 +69,40 @@ app.use((err, req, res, next) => {
   });
 });
 
-// Start Server
-app.listen(config.port, () => {
-  console.log(`
+// Start Server — with EADDRINUSE retry so --watch restarts don't crash
+function startServer(port, retries = 5) {
+  const server = app.listen(port, () => {
+    console.log(`
   ======================================================
-  🚀 RazorAgent API Server running on port ${config.port}
-  📍 Health:     http://localhost:${config.port}/api/health
-  🤖 ACP Card:   http://localhost:${config.port}/.well-known/agent.json
-  📦 Catalog:    http://localhost:${config.port}/api/catalog
+  🚀 RazorAgent API Server running on port ${port}
+  📍 Health:     http://localhost:${port}/api/health
+  🤖 ACP Card:   http://localhost:${port}/.well-known/agent.json
+  📦 Catalog:    http://localhost:${port}/api/catalog
   🛡️ Safety & Audit Gateway: ACTIVE
   ======================================================
   `);
-});
+  });
+
+  server.on('error', (err) => {
+    if (err.code === 'EADDRINUSE' && retries > 0) {
+      console.warn(`⚠️  Port ${port} busy — retrying in 1s... (${retries} attempts left)`);
+      setTimeout(() => startServer(port, retries - 1), 1000);
+    } else {
+      console.error('❌ Server failed to start:', err.message);
+      process.exit(1);
+    }
+  });
+
+  // Graceful shutdown so --watch can reclaim the port cleanly
+  const shutdown = () => {
+    server.close(() => process.exit(0));
+  };
+  process.once('SIGTERM', shutdown);
+  process.once('SIGINT', shutdown);
+
+  return server;
+}
+
+startServer(config.port);
 
 export default app;
