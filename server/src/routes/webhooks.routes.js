@@ -29,7 +29,21 @@ router.post('/razorpay', async (req, res) => {
 
     console.log(`🔔 Webhook received: ${event}`);
 
-    if (event === 'payment.captured') {
+    // Auto-capture authorized recurring payments (SBMD frictionless flow)
+    if (event === 'payment.authorized') {
+      const paymentEntity = eventData.payment?.entity;
+      if (paymentEntity && paymentEntity.id) {
+        try {
+          // Only auto-capture if this is a recurring/token payment
+          if (paymentEntity.token_id || paymentEntity.recurring) {
+            await razorpayService.capturePayment(paymentEntity.id, paymentEntity.amount);
+            console.log(`⚡ Auto-captured authorized payment: ${paymentEntity.id}`);
+          }
+        } catch (captureErr) {
+          console.warn('Auto-capture failed:', captureErr.message);
+        }
+      }
+    } else if (event === 'payment.captured') {
       const paymentEntity = eventData.payment?.entity;
       if (paymentEntity && paymentEntity.order_id) {
         const order = await prisma.order.findUnique({
