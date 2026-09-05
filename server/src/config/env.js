@@ -32,7 +32,8 @@ export const config = {
   razorpayKeySecret: process.env.RAZORPAY_KEY_SECRET || '',
   razorpayWebhookSecret: process.env.RAZORPAY_WEBHOOK_SECRET || 'razoragent_webhook_secret_xyz',
   clientUrl: process.env.CLIENT_URL || 'http://localhost:5173',
-  isRazorpayLive: Boolean(process.env.RAZORPAY_KEY_ID && process.env.RAZORPAY_KEY_SECRET)
+  isRazorpayLive: Boolean(process.env.RAZORPAY_KEY_ID && process.env.RAZORPAY_KEY_SECRET),
+  sbmdEnabled: process.env.SBMD_ENABLED === 'true'
 };
 
 export default config;

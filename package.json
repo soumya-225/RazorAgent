@@ -9,7 +9,10 @@
     "db:seed": "npm run db:seed --prefix server",
     "server": "npm run dev --prefix server",
     "client": "npm run dev --prefix client",
-    "start": "node start-all.js"
+    "up": "docker compose up --build -d db app",
+    "down": "docker compose down",
+    "start": "node start-all.js",
+    "dev:docker": "bash ./scripts/start-dev.sh"
   },
   "keywords": [
     "agentic-commerce",

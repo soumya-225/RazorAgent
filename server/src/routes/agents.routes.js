@@ -4,6 +4,8 @@ import checkoutAgent from '../agents/checkoutAgent.js';
 import upsellAgent from '../agents/upsellAgent.js';
 import campaignAgent from '../agents/campaignAgent.js';
 import buyerAgent from '../agents/buyerAgent.js';
+import razorpayService from '../services/razorpayService.js';
+import config from '../config/env.js';
 import { optionalMerchantAuth, requireMerchantAuth } from '../middleware/auth.middleware.js';
 import razorpayService from '../services/razorpayService.js';
 import config from '../config/env.js';
@@ -100,10 +102,18 @@ router.post('/sbmd/fetch-token', async (req, res) => {
 /**
  * POST /api/agents/checkout
  * Initiate Order with Safety Gating
+ * Body: { items, customer, couponCode, sbmdPaymentMethod, sbmdToken: { customerId, tokenId } }
  */
 router.post('/checkout', optionalMerchantAuth, async (req, res) => {
   try {
-    const { items, customer, couponCode, sessionId = 'checkout_session', sbmdToken } = req.body;
+    const {
+      items,
+      customer,
+      couponCode,
+      sessionId = 'checkout_session',
+      sbmdPaymentMethod = null,
+      sbmdToken = null   // { customerId, tokenId } from client localStorage
+    } = req.body;
     const merchantId = req.merchant?.id || null;
 
     const result = await checkoutAgent.createOrder({
@@ -112,7 +122,8 @@ router.post('/checkout', optionalMerchantAuth, async (req, res) => {
       items,
       customer,
       couponCode,
-      sbmdToken: sbmdToken || null,
+      sbmdPaymentMethod,
+      sbmdToken,
       explanation: 'Customer placed order via RazorAgent Checkout'
     });
 
@@ -126,6 +137,75 @@ router.post('/checkout', optionalMerchantAuth, async (req, res) => {
         details: err.details
       });
     }
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * POST /api/agents/sbmd/create-customer
+ * One-time SBMD setup: creates a Razorpay Customer + a ₹1 recurring setup order.
+ * Frontend opens Razorpay Checkout with recurring:1 to save the payment method.
+ */
+router.post('/sbmd/create-customer', async (req, res) => {
+  try {
+    const { name, email, contact } = req.body;
+
+    const customer = await razorpayService.createCustomer({
+      name: name || 'RazorAgent User',
+      email: email || 'shopper@razoragent.demo',
+      contact: contact || '+919876543210'
+    });
+
+    // Create a minimal ₹1 order for the authorization/registration payment
+    const setupOrder = await razorpayService.createOrder({
+      amount: 100, // ₹1 in paise
+      currency: 'INR',
+      receipt: `sbmd_setup_${Date.now()}`,
+      notes: { purpose: 'sbmd_mandate_setup' }
+    });
+
+    return res.json({
+      customerId: customer.id,
+      orderId: setupOrder.id,
+      keyId: config.razorpayKeyId,
+      amount: 100,
+      currency: 'INR',
+      isSandbox: customer.isSandbox || setupOrder.isSandbox || false
+    });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * POST /api/agents/sbmd/fetch-token
+ * After the setup checkout succeeds, fetch the customer's saved token.
+ * Body: { customerId, paymentId }
+ */
+router.post('/sbmd/fetch-token', async (req, res) => {
+  try {
+    const { customerId } = req.body;
+
+    if (!customerId) {
+      return res.status(400).json({ error: 'customerId is required' });
+    }
+
+    const tokens = await razorpayService.fetchCustomerTokens(customerId);
+
+    if (tokens.length > 0) {
+      const token = tokens[0];
+      return res.json({
+        tokenId: token.id,
+        customerId,
+        method: token.payment_method || 'card',
+        bank: token.bank,
+        network: token.network,
+        last4: token.dcc_enabled ? undefined : undefined // masked by Razorpay
+      });
+    }
+
+    return res.status(404).json({ error: 'No saved token found for this customer. Complete the setup checkout first.' });
+  } catch (err) {
     return res.status(500).json({ error: err.message });
   }
 });
@@ -153,7 +233,6 @@ router.post('/upsell', optionalMerchantAuth, async (req, res) => {
 
 /**
  * POST /api/agents/bundle-checkout
- * Create Payment Link for Discounted Bundle Deal
  */
 router.post('/bundle-checkout', optionalMerchantAuth, async (req, res) => {
   try {
@@ -233,7 +312,6 @@ router.get('/campaign/insights', optionalMerchantAuth, async (req, res) => {
 
 /**
  * POST /api/agents/campaign/analyze
- * Scans Inventory for Slow-Moving / High-Margin Opportunities
  */
 router.post('/campaign/analyze', optionalMerchantAuth, async (req, res) => {
   try {
@@ -247,7 +325,6 @@ router.post('/campaign/analyze', optionalMerchantAuth, async (req, res) => {
 
 /**
  * POST /api/agents/campaign/run
- * Generates and Launches Targeted Growth Campaign
  */
 router.post('/campaign/run', optionalMerchantAuth, async (req, res) => {
   try {
@@ -278,7 +355,6 @@ router.post('/campaign/run', optionalMerchantAuth, async (req, res) => {
 
 /**
  * POST /api/agents/buyer/run
- * Runs Autonomous AI Buyer Simulation
  */
 router.post('/buyer/run', async (req, res) => {
   try {

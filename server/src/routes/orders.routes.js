@@ -311,6 +311,14 @@ router.post('/:id/verify-payment', async (req, res) => {
       }
     }
 
+    // Decrement merchant spending cap if merchant is set
+    if (order.merchantId) {
+      await prisma.merchant.update({
+        where: { id: order.merchantId },
+        data: { spendingCapPaise: { decrement: order.totalAmountPaise } }
+      }).catch(() => {});
+    }
+
     await safetyService.logAudit({
       sessionId: 'session_razorpay_checkout',
       agentName: 'CHECKOUT_AGENT',

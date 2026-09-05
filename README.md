@@ -65,15 +65,24 @@ RazorAgent/
 
 ## 🚀 Quick Start Guide
 
-### 1. Database Setup (PostgreSQL)
-Ensure PostgreSQL is running locally on port `5432`.
-Create the database:
+### 1. Start the database container
+The easiest path is to use Docker for Postgres and the API container in one go:
+```bash
+npm run dev:docker
+```
+This command:
+- stops any stale processes on ports 5000 and 5173
+- starts the Postgres + API containers via Docker Compose
+- waits for the API health check to pass
+- starts the React frontend on port 5173
+
+If you prefer a manual local setup instead, ensure PostgreSQL is running locally on port `5432` and create the database:
 ```sql
 CREATE DATABASE razoragent_db;
 ```
 
 ### 2. Configure Environment (`server/.env`)
-Edit `server/.env` if you want to add your OpenAI API key or live Razorpay test keys:
+For a local non-Docker run, edit `server/.env` if you want to add your OpenAI API key or live Razorpay test keys:
 ```env
 PORT=5000
 DATABASE_URL="postgresql://postgres@localhost:5432/razoragent_db"
@@ -85,16 +94,19 @@ RAZORPAY_KEY_SECRET="" # Optional: Add Razorpay Test Key Secret
 RAZORPAY_WEBHOOK_SECRET="razoragent_webhook_secret_xyz"
 ```
 
+For Docker Compose, the app container connects to the internal service host `db:5432`, and the Compose file already injects that automatically.
+
 ### 3. Migrate & Seed Database
 ```bash
-# Push Prisma schema and seed initial merchant, catalog, and audit log
 npm run db:push
 npm run db:seed
 ```
 
 ### 4. Start the Application
-Run both backend and frontend together with a single command:
+Use either of these commands:
 ```bash
+npm run dev:docker
+# or
 npm start
 ```
 - **Merchant & Buyer Web App**: [http://localhost:5173](http://localhost:5173)
