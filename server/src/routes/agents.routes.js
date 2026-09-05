@@ -7,8 +7,6 @@ import buyerAgent from '../agents/buyerAgent.js';
 import razorpayService from '../services/razorpayService.js';
 import config from '../config/env.js';
 import { optionalMerchantAuth, requireMerchantAuth } from '../middleware/auth.middleware.js';
-import razorpayService from '../services/razorpayService.js';
-import config from '../config/env.js';
 
 const router = express.Router();
 
@@ -141,74 +139,6 @@ router.post('/checkout', optionalMerchantAuth, async (req, res) => {
   }
 });
 
-/**
- * POST /api/agents/sbmd/create-customer
- * One-time SBMD setup: creates a Razorpay Customer + a ₹1 recurring setup order.
- * Frontend opens Razorpay Checkout with recurring:1 to save the payment method.
- */
-router.post('/sbmd/create-customer', async (req, res) => {
-  try {
-    const { name, email, contact } = req.body;
-
-    const customer = await razorpayService.createCustomer({
-      name: name || 'RazorAgent User',
-      email: email || 'shopper@razoragent.demo',
-      contact: contact || '+919876543210'
-    });
-
-    // Create a minimal ₹1 order for the authorization/registration payment
-    const setupOrder = await razorpayService.createOrder({
-      amount: 100, // ₹1 in paise
-      currency: 'INR',
-      receipt: `sbmd_setup_${Date.now()}`,
-      notes: { purpose: 'sbmd_mandate_setup' }
-    });
-
-    return res.json({
-      customerId: customer.id,
-      orderId: setupOrder.id,
-      keyId: config.razorpayKeyId,
-      amount: 100,
-      currency: 'INR',
-      isSandbox: customer.isSandbox || setupOrder.isSandbox || false
-    });
-  } catch (err) {
-    return res.status(500).json({ error: err.message });
-  }
-});
-
-/**
- * POST /api/agents/sbmd/fetch-token
- * After the setup checkout succeeds, fetch the customer's saved token.
- * Body: { customerId, paymentId }
- */
-router.post('/sbmd/fetch-token', async (req, res) => {
-  try {
-    const { customerId } = req.body;
-
-    if (!customerId) {
-      return res.status(400).json({ error: 'customerId is required' });
-    }
-
-    const tokens = await razorpayService.fetchCustomerTokens(customerId);
-
-    if (tokens.length > 0) {
-      const token = tokens[0];
-      return res.json({
-        tokenId: token.id,
-        customerId,
-        method: token.payment_method || 'card',
-        bank: token.bank,
-        network: token.network,
-        last4: token.dcc_enabled ? undefined : undefined // masked by Razorpay
-      });
-    }
-
-    return res.status(404).json({ error: 'No saved token found for this customer. Complete the setup checkout first.' });
-  } catch (err) {
-    return res.status(500).json({ error: err.message });
-  }
-});
 
 /**
  * POST /api/agents/upsell
