@@ -2,19 +2,22 @@
 .PHONY: up down logs ps stop start test
 
 up:
-	docker-compose up --build -d
+	docker compose up --build -d db app
 
 down:
-	docker-compose down
+	docker compose down
 
 logs:
-	docker-compose logs -f
+	docker compose logs -f
 
 ps:
-	docker-compose ps
+	docker compose ps
 
 exec:
-	docker-compose exec app /bin/bash
+	docker compose exec app /bin/bash
 
 test:
 	./scripts/test-sbmd.sh
+
+start:
+	npm run dev:docker
