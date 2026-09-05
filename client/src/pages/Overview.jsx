@@ -1,42 +1,74 @@
 import React, { useState, useEffect } from 'react';
 import {
-  TrendingUp, ShoppingBag, ShieldCheck, Sparkles, Bot, AlertCircle,
-  ArrowUpRight, RefreshCw, CheckCircle, Clock, ExternalLink, Settings, Save,
-  Package, DollarSign, Activity, Target
+  TrendingUp, ShoppingBag, Sparkles, AlertCircle,
+  ArrowUpRight, RefreshCw, CheckCircle, Clock, ExternalLink,
+  Package, DollarSign, Activity, Target, Zap, ChevronRight, BarChart3
 } from 'lucide-react';
 import api from '../api';
 import { useAuth } from '../context/AuthContext';
 
-// Mini sparkline bar chart (CSS only)
+// High-fidelity 7-Day Revenue Bar Chart
 function RevenueChart({ data }) {
   if (!data || data.length === 0) return null;
-  const max = Math.max(...data.map(d => Number(d.revenueInr) || 0), 1);
+  const maxRevenue = Math.max(...data.map(d => Number(d.revenueInr) || 0), 500);
 
   return (
-    <div className="flex items-end gap-1 h-16">
-      {data.map((d, i) => {
-        const height = Math.max(((Number(d.revenueInr) || 0) / max) * 100, 2);
-        const isToday = i === data.length - 1;
-        return (
-          <div key={d.date} className="flex-1 flex flex-col items-center gap-1 group relative">
-            <div
-              className={`w-full rounded-t-sm transition-all duration-500 chart-bar ${
-                isToday ? 'bg-blue-500' : 'bg-blue-500/30 group-hover:bg-blue-500/60'
-              }`}
-              style={{ height: `${height}%` }}
-            />
-            {/* Tooltip */}
-            <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 hidden group-hover:flex flex-col items-center z-10 pointer-events-none">
-              <div className="bg-slate-800 border border-slate-700 rounded-lg px-2 py-1 text-[10px] text-white whitespace-nowrap shadow-xl">
-                <div className="font-mono font-bold text-blue-400">₹{(Number(d.revenueInr) || 0).toLocaleString('en-IN')}</div>
-                <div className="text-slate-400 text-[9px]">{d.date?.slice(5)} · {d.orderCount || 0} orders</div>
+    <div className="space-y-3">
+      <div className="h-44 flex items-end justify-between gap-2.5 pt-6 pb-2 px-2 bg-slate-950/60 rounded-xl border border-slate-800/80">
+        {data.map((d, i) => {
+          const rev = Number(d.revenueInr) || 0;
+          const heightPercent = Math.max((rev / maxRevenue) * 100, rev > 0 ? 12 : 3);
+          const isToday = i === data.length - 1;
+
+          return (
+            <div key={d.date || i} className="flex-1 flex flex-col items-center h-full justify-end group relative cursor-pointer">
+              {/* Tooltip on hover */}
+              <div className="absolute bottom-full mb-2.5 left-1/2 -translate-x-1/2 hidden group-hover:flex flex-col items-center z-20 pointer-events-none transition-all">
+                <div className="bg-slate-900 border border-blue-500/30 rounded-xl px-3 py-1.5 text-xs text-white shadow-2xl backdrop-blur-md">
+                  <div className="font-mono font-bold text-blue-400 text-xs">₹{rev.toLocaleString('en-IN')}</div>
+                  <div className="text-[10px] text-slate-400">{d.label || d.date} · {d.orderCount || 0} order{d.orderCount === 1 ? '' : 's'}</div>
+                </div>
+                <div className="w-2 h-2 bg-slate-900 rotate-45 -mt-1 border-r border-b border-blue-500/30" />
               </div>
-              <div className="w-1.5 h-1.5 bg-slate-800 rotate-45 -mt-0.5 border-r border-b border-slate-700" />
+
+              {/* Amount on top of bar */}
+              <div className={`text-[10px] font-mono font-semibold mb-1.5 transition-colors ${
+                rev > 0 ? (isToday ? 'text-blue-300 font-bold' : 'text-slate-400') : 'text-slate-600'
+              }`}>
+                {rev > 0 ? `₹${rev >= 1000 ? `${(rev / 1000).toFixed(1)}k` : rev}` : '₹0'}
+              </div>
+
+              {/* Bar column */}
+              <div className="w-full max-w-[48px] h-full flex items-end">
+                <div
+                  className={`w-full rounded-t-lg transition-all duration-500 relative overflow-hidden ${
+                    rev > 0
+                      ? isToday
+                        ? 'bg-gradient-to-t from-blue-600 via-indigo-600 to-sky-400 shadow-lg shadow-blue-500/30'
+                        : 'bg-gradient-to-t from-blue-700/60 to-indigo-500/80 group-hover:from-blue-600 group-hover:to-indigo-400'
+                      : 'bg-slate-800/40 group-hover:bg-slate-800/80'
+                  }`}
+                  style={{ height: `${heightPercent}%` }}
+                >
+                  {isToday && rev > 0 && (
+                    <div className="absolute inset-x-0 top-0 h-1 bg-white/50 rounded-t-lg" />
+                  )}
+                </div>
+              </div>
+
+              {/* Day & Date Labels */}
+              <div className="mt-2 text-center">
+                <div className={`text-[11px] font-bold ${isToday ? 'text-blue-400 font-extrabold' : 'text-slate-300'}`}>
+                  {d.dayName || d.date?.slice(5)}
+                </div>
+                <div className="text-[9px] text-slate-500 font-mono">
+                  {d.date?.slice(5)}
+                </div>
+              </div>
             </div>
-            <div className="text-[9px] text-slate-600">{d.date?.slice(5)}</div>
-          </div>
-        );
-      })}
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -73,31 +105,23 @@ function StatCard({ label, value, sub, icon: Icon, color, trend }) {
 }
 
 export default function Overview({ setActiveTab }) {
-  const { merchant, updateSettings } = useAuth();
+  const { merchant } = useAuth();
   const [metrics, setMetrics] = useState(null);
   const [recentOrders, setRecentOrders] = useState([]);
   const [revenueByDay, setRevenueByDay] = useState([]);
   const [topProducts, setTopProducts] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [savingSettings, setSavingSettings] = useState(false);
 
-  const [spendingCap, setSpendingCap] = useState(merchant?.spendingCapInr || 10000);
-  const [approvalThreshold, setApprovalThreshold] = useState(merchant?.approvalThresholdInr || 5000);
-  const [settingsSavedMsg, setSettingsSavedMsg] = useState(false);
+  // AI Campaign Revenue Insights
+  const [insights, setInsights] = useState(null);
+  const [loadingInsights, setLoadingInsights] = useState(false);
 
   useEffect(() => {
     fetchDashboardData();
-    // Auto-refresh every 30 seconds so new customer orders appear without manual refresh
+    fetchCampaignInsights();
     const interval = setInterval(fetchDashboardData, 30000);
     return () => clearInterval(interval);
   }, []);
-
-  useEffect(() => {
-    if (merchant) {
-      setSpendingCap(merchant.spendingCapInr || 10000);
-      setApprovalThreshold(merchant.approvalThresholdInr || 5000);
-    }
-  }, [merchant]);
 
   const fetchDashboardData = async () => {
     setLoading(true);
@@ -106,20 +130,33 @@ export default function Overview({ setActiveTab }) {
         api.get('/api/orders/metrics/summary'),
         api.get('/api/orders?limit=6')
       ]);
-      setMetrics(metricsRes.data);
+
+      const data = metricsRes.data || {};
+      setMetrics(data);
       setRecentOrders(ordersRes.data?.orders || []);
 
-      // Try to get marketplace analytics for chart data
-      try {
-        const apiKey = merchant?.apiKey;
-        if (apiKey) {
-          const analyticsRes = await api.get('/api/marketplace/analytics', {
-            headers: { 'X-API-Key': apiKey }
+      if (data.revenueByDay && data.revenueByDay.length > 0) {
+        setRevenueByDay(data.revenueByDay);
+      } else {
+        // Fallback last 7 days array if not present
+        const now = new Date();
+        const fallbackDays = [];
+        for (let i = 6; i >= 0; i--) {
+          const d = new Date(now);
+          d.setDate(now.getDate() - i);
+          fallbackDays.push({
+            date: d.toISOString().slice(0, 10),
+            dayName: d.toLocaleDateString('en-US', { weekday: 'short' }),
+            revenueInr: 0,
+            orderCount: 0
           });
-          setRevenueByDay(analyticsRes.data?.revenueByDay || []);
-          setTopProducts(analyticsRes.data?.topProducts || []);
         }
-      } catch { /* analytics may not be available */ }
+        setRevenueByDay(fallbackDays);
+      }
+
+      if (data.topProducts) {
+        setTopProducts(data.topProducts);
+      }
     } catch (err) {
       console.error('Failed to load dashboard data:', err);
     } finally {
@@ -127,61 +164,52 @@ export default function Overview({ setActiveTab }) {
     }
   };
 
-  const handleSaveSafetySettings = async (e) => {
-    e.preventDefault();
-    setSavingSettings(true);
+  const fetchCampaignInsights = async () => {
+    setLoadingInsights(true);
     try {
-      await updateSettings({
-        spendingCapInr: Number(spendingCap),
-        approvalThresholdInr: Number(approvalThreshold)
-      });
-      setSettingsSavedMsg(true);
-      setTimeout(() => setSettingsSavedMsg(false), 2500);
+      const res = await api.get('/api/agents/campaign/insights');
+      setInsights(res.data);
     } catch (err) {
-      alert('Error updating settings: ' + err.message);
+      console.warn('Failed to load AI campaign insights:', err);
     } finally {
-      setSavingSettings(false);
+      setLoadingInsights(false);
     }
   };
 
   const totalRevenue = metrics?.totalRevenueInr || 0;
   const conversionRate = metrics?.conversionRate || 0;
+  const sevenDayTotal = revenueByDay.reduce((s, d) => s + (Number(d?.revenueInr) || 0), 0);
 
   return (
     <div className="space-y-6 animate-fade-in-up">
       {/* Welcome Banner */}
-      <div className="p-6 rounded-2xl bg-gradient-to-r from-blue-900/40 via-indigo-900/20 to-slate-900 border border-blue-500/20 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+      <div className="p-6 rounded-2xl bg-gradient-to-r from-blue-950/70 via-indigo-950/40 to-slate-900 border border-blue-500/20 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 shadow-xl">
         <div>
           <div className="flex items-center gap-2 mb-1">
-            <span className="text-xs uppercase tracking-widest font-bold text-blue-400">Agentic Commerce Engine</span>
+            <span className="text-xs uppercase tracking-widest font-bold text-blue-400">Merchant AI Growth Engine</span>
             <span className="w-1.5 h-1.5 rounded-full bg-blue-400" />
-            <span className="text-xs text-slate-400">Autonomous Protocol Ready</span>
+            <span className="text-xs text-slate-400">Autonomous Commerce Active</span>
           </div>
           <h1 className="text-2xl font-black text-white tracking-tight">
             {merchant?.storeName || 'Merchant Dashboard'}
           </h1>
           <p className="text-xs text-slate-400 mt-1 max-w-lg">
-            Revenue agents boosting conversions, AI-powered campaign orchestration, and safety-gated autonomous buyers.
+            AI-powered campaign orchestration, smart cart upsells, and autonomous checkout revenue analytics.
           </p>
         </div>
         <div className="flex items-center gap-2">
           <button
             onClick={() => setActiveTab('campaigns')}
-            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs shadow-lg shadow-blue-600/30 transition-all cursor-pointer"
+            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-semibold text-xs shadow-lg shadow-blue-600/30 transition-all cursor-pointer"
           >
-            <Sparkles className="w-3.5 h-3.5" /> Run AI Campaign
+            <Sparkles className="w-3.5 h-3.5" /> Launch AI Campaign
           </button>
           <button
-            onClick={() => setActiveTab('buyer')}
-            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-semibold text-xs transition-all cursor-pointer"
+            onClick={() => { fetchDashboardData(); fetchCampaignInsights(); }}
+            className="p-2 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-slate-400 hover:text-white transition-colors border border-slate-700 cursor-pointer"
+            title="Refresh All"
           >
-            <Bot className="w-3.5 h-3.5 text-sky-400" /> AI Buyer Sim
-          </button>
-          <button
-            onClick={fetchDashboardData}
-            className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition-colors border border-slate-700 cursor-pointer"
-          >
-            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+            <RefreshCw className={`w-4 h-4 ${loading || loadingInsights ? 'animate-spin' : ''}`} />
           </button>
         </div>
       </div>
@@ -191,19 +219,19 @@ export default function Overview({ setActiveTab }) {
         <StatCard
           label="Total Revenue (Paid)"
           value={`₹${(totalRevenue || 0).toLocaleString('en-IN')}`}
-          sub="Razorpay captured"
+          sub="Captured via Razorpay"
           icon={DollarSign}
           color="emerald"
         />
         <StatCard
           label="Total Orders"
           value={metrics?.totalOrders || 0}
-          sub={`${metrics?.paidOrdersCount || 0} paid orders`}
+          sub={`${metrics?.paidOrdersCount || 0} completed orders`}
           icon={ShoppingBag}
           color="blue"
         />
         <StatCard
-          label="Conversion Rate"
+          label="Checkout Conversion"
           value={`${conversionRate}%`}
           sub="Created → Paid"
           icon={Activity}
@@ -211,47 +239,151 @@ export default function Overview({ setActiveTab }) {
           trend={conversionRate > 50 ? Math.round(conversionRate - 50) : undefined}
         />
         <StatCard
-          label="Active Campaigns"
+          label="Active AI Campaigns"
           value={metrics?.activeCampaigns || 0}
-          sub="Revenue campaigns live"
+          sub="Live revenue drivers"
           icon={Target}
           color="amber"
         />
       </div>
 
-      {/* Revenue Chart + Safety Settings row */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-
-        {/* Revenue Chart */}
-        <div className="lg:col-span-2 glass-card rounded-2xl p-5 space-y-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <h2 className="text-sm font-bold text-white">Revenue — Last 7 Days</h2>
-              <p className="text-[11px] text-slate-400">Daily revenue from paid orders</p>
+      {/* AI Campaign Revenue Insights Card */}
+      <div className="glass-card rounded-2xl p-6 border border-indigo-500/25 bg-gradient-to-br from-slate-900 via-slate-950 to-indigo-950/20 relative overflow-hidden shadow-xl">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-slate-800/80">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-xl bg-indigo-500/20 border border-indigo-500/30 flex items-center justify-center text-indigo-400 shadow">
+              <Sparkles className="w-4 h-4" />
             </div>
-            <div className="text-right">
-              <div className="text-xs font-mono font-bold text-blue-400">
-                ₹{(revenueByDay.reduce((s, d) => s + (Number(d?.revenueInr) || 0), 0)).toLocaleString('en-IN')}
+            <div>
+              <div className="flex items-center gap-2">
+                <h2 className="text-sm font-bold text-white">AI Campaign Revenue Insights</h2>
+                <span className="text-[10px] bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 px-2 py-0.5 rounded-full font-semibold">
+                  Live Executive Analysis
+                </span>
               </div>
-              <div className="text-[10px] text-slate-500">7-day total</div>
+              <p className="text-[11px] text-slate-400">Natural language analysis of promotional lift & inventory monetization</p>
+            </div>
+          </div>
+          <button
+            onClick={fetchCampaignInsights}
+            disabled={loadingInsights}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 text-xs font-semibold transition-all cursor-pointer disabled:opacity-50 shrink-0 self-start sm:self-auto"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${loadingInsights ? 'animate-spin' : ''}`} />
+            {loadingInsights ? 'Analyzing...' : 'Regenerate Insights'}
+          </button>
+        </div>
+
+        {/* Highlight Metrics Row */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 py-4">
+          <div className="p-3 rounded-xl bg-slate-950/80 border border-slate-800">
+            <div className="text-[10px] text-slate-500 font-medium">Campaign Revenue</div>
+            <div className="text-lg font-extrabold font-mono text-emerald-400 mt-0.5">
+              ₹{(insights?.campaignRevenueInr || 0).toLocaleString('en-IN')}
+            </div>
+            <div className="text-[10px] text-slate-400 mt-0.5">
+              {insights?.campaignSharePercent || 0}% of store sales
             </div>
           </div>
 
-          {revenueByDay.length > 0 ? (
-            <RevenueChart data={revenueByDay} />
-          ) : (
-            <div className="h-16 flex items-center justify-center">
-              <div className="flex items-end gap-1 h-14 opacity-25">
-                {[30, 60, 45, 80, 55, 90, 70].map((h, i) => (
-                  <div key={i} className="flex-1 bg-blue-500/40 rounded-t-sm" style={{ height: `${h}%` }} />
-                ))}
-              </div>
-              <p className="absolute text-xs text-slate-500">No revenue data yet — start making sales!</p>
+          <div className="p-3 rounded-xl bg-slate-950/80 border border-slate-800">
+            <div className="text-[10px] text-slate-500 font-medium">Campaign Orders</div>
+            <div className="text-lg font-extrabold font-mono text-blue-400 mt-0.5">
+              {insights?.campaignOrdersCount || 0}
+            </div>
+            <div className="text-[10px] text-slate-400 mt-0.5">
+              out of {insights?.totalOrdersCount || 0} paid orders
+            </div>
+          </div>
+
+          <div className="p-3 rounded-xl bg-slate-950/80 border border-slate-800">
+            <div className="text-[10px] text-slate-500 font-medium">Discounts Invested</div>
+            <div className="text-lg font-extrabold font-mono text-amber-400 mt-0.5">
+              ₹{(insights?.campaignDiscountsInr || 0).toLocaleString('en-IN')}
+            </div>
+            <div className="text-[10px] text-slate-400 mt-0.5">
+              Promo incentives given
+            </div>
+          </div>
+
+          <div className="p-3 rounded-xl bg-slate-950/80 border border-slate-800">
+            <div className="text-[10px] text-slate-500 font-medium">Active Promos</div>
+            <div className="text-lg font-extrabold font-mono text-purple-400 mt-0.5">
+              {insights?.activeCampaignsCount || 0} Live
+            </div>
+            <div className="text-[10px] text-slate-400 mt-0.5">
+              Driving conversions
+            </div>
+          </div>
+        </div>
+
+        {/* Narrative Box */}
+        <div className="p-4 rounded-xl bg-indigo-950/20 border border-indigo-500/20 space-y-3">
+          {insights?.headline && (
+            <div className="text-xs font-bold text-indigo-300 flex items-center gap-1.5">
+              <Zap className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+              {insights.headline}
             </div>
           )}
 
-          {/* Avg Order Value metric */}
-          <div className="grid grid-cols-3 gap-3 pt-3 border-t border-slate-800">
+          {/* Bullet point narrative */}
+          {insights?.narrative ? (
+            <ul className="space-y-1.5">
+              {insights.narrative
+                .split(/\n+/)
+                .map(s => s.replace(/^[-•*]\s*/, '').trim())
+                .filter(Boolean)
+                .slice(0, 5)
+                .map((point, idx) => (
+                  <li key={idx} className="flex items-start gap-2 text-xs text-slate-300 leading-relaxed">
+                    <span className="mt-0.5 w-1.5 h-1.5 rounded-full bg-indigo-400 shrink-0" />
+                    <span dangerouslySetInnerHTML={{ __html: point.replace(/\*\*(.*?)\*\*/g, '<strong class="text-white">$1</strong>') }} />
+                  </li>
+                ))
+              }
+            </ul>
+          ) : (
+            <p className="text-xs text-slate-500 italic">Loading AI revenue commentary...</p>
+          )}
+
+          {insights?.topCampaignItems && insights.topCampaignItems.length > 0 && (
+            <div className="pt-2 border-t border-indigo-500/10 flex items-center gap-2 flex-wrap text-[11px]">
+              <span className="text-slate-400 font-medium">Campaign Top Movers:</span>
+              {insights.topCampaignItems.map((item, idx) => (
+                <span key={idx} className="px-2 py-0.5 rounded-md bg-indigo-500/10 border border-indigo-500/20 text-indigo-300 font-mono text-[10px]">
+                  {item}
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Revenue Chart + Top Products Row */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+
+        {/* Revenue Chart (8 Cols) */}
+        <div className="lg:col-span-8 glass-card rounded-2xl p-5 space-y-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <BarChart3 className="w-4 h-4 text-blue-400" />
+              <div>
+                <h2 className="text-sm font-bold text-white">Revenue — Last 7 Days</h2>
+                <p className="text-[11px] text-slate-400">Daily breakdown of captured order revenue</p>
+              </div>
+            </div>
+            <div className="text-right">
+              <div className="text-sm font-mono font-bold text-blue-400">
+                ₹{sevenDayTotal.toLocaleString('en-IN')}
+              </div>
+              <div className="text-[10px] text-slate-500">7-Day Captured Total</div>
+            </div>
+          </div>
+
+          <RevenueChart data={revenueByDay} />
+
+          {/* Quick Metrics Footer */}
+          <div className="grid grid-cols-3 gap-3 pt-3 border-t border-slate-800 text-xs">
             <div>
               <div className="text-[10px] text-slate-500">Avg Order Value</div>
               <div className="text-sm font-mono font-bold text-white">
@@ -261,185 +393,44 @@ export default function Overview({ setActiveTab }) {
               </div>
             </div>
             <div>
-              <div className="text-[10px] text-slate-500">Audit Events</div>
-              <div className="text-sm font-mono font-bold text-white">{metrics?.auditEventsCount || 0}</div>
+              <div className="text-[10px] text-slate-500">Daily Average (7D)</div>
+              <div className="text-sm font-mono font-bold text-emerald-400">
+                ₹{Math.round(sevenDayTotal / 7).toLocaleString('en-IN')}
+              </div>
             </div>
             <div>
-              <div className="text-[10px] text-slate-500">Pending Approvals</div>
-              <div className={`text-sm font-mono font-bold ${metrics?.pendingApprovals > 0 ? 'text-amber-400' : 'text-white'}`}>
-                {metrics?.pendingApprovals || 0}
+              <div className="text-[10px] text-slate-500">Completed Orders</div>
+              <div className="text-sm font-mono font-bold text-white">
+                {metrics?.paidOrdersCount || 0}
               </div>
             </div>
           </div>
         </div>
 
-        {/* Safety Guardrails */}
-        <div className="glass-card rounded-2xl p-5 space-y-4">
-          <div className="flex items-center gap-2">
-            <ShieldCheck className="w-5 h-5 text-blue-400" />
-            <div>
-              <h2 className="text-sm font-bold text-white">Safety Gating Kernel</h2>
-              <p className="text-[11px] text-slate-400">Configure boundaries & human gates</p>
-            </div>
-          </div>
-
-          <form onSubmit={handleSaveSafetySettings} className="space-y-3.5 text-xs">
-            <div>
-              <label className="text-slate-300 font-medium block mb-1">Session Spending Cap (₹)</label>
-              <input
-                type="number" value={spendingCap} onChange={e => setSpendingCap(e.target.value)}
-                className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white font-mono focus:outline-none focus:border-blue-500"
-              />
-              <span className="text-[10px] text-slate-500 mt-1 block">Hard block when agent spending exceeds this.</span>
-            </div>
-            <div>
-              <label className="text-slate-300 font-medium block mb-1">High-Value Approval Gate (₹)</label>
-              <input
-                type="number" value={approvalThreshold} onChange={e => setApprovalThreshold(e.target.value)}
-                className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white font-mono focus:outline-none focus:border-blue-500"
-              />
-              <span className="text-[10px] text-slate-500 mt-1 block">Requires human sign-off above this amount.</span>
-            </div>
-            <button type="submit" disabled={savingSettings}
-              className="w-full py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-semibold flex items-center justify-center gap-2 shadow-lg shadow-blue-600/30 transition-all disabled:opacity-50 cursor-pointer">
-              <Save className="w-3.5 h-3.5" />
-              {savingSettings ? 'Saving...' : 'Update Safety Limits'}
-            </button>
-            {settingsSavedMsg && (
-              <div className="p-2 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-center text-[11px] font-medium animate-fade-in">
-                ✓ Safety limits updated and live!
-              </div>
-            )}
-          </form>
-
-          {/* Live Endpoints */}
-          <div className="pt-3 border-t border-slate-800 text-[11px] space-y-1.5">
-            <div className="font-semibold text-slate-300">Machine-Readable Endpoints:</div>
-            {[
-              { path: '/.well-known/agent.json', label: 'ACP Card' },
-              { path: '/api/catalog',            label: 'JSON-LD' },
-              { path: '/api/marketplace/info',   label: 'Marketplace API' },
-            ].map(ep => (
-              <div key={ep.path} className="flex items-center justify-between p-2 rounded-lg bg-slate-900 font-mono text-[10px] text-slate-400">
-                <span className="truncate">{ep.path}</span>
-                <a href={ep.path} target="_blank" rel="noreferrer" className="text-blue-400 hover:underline flex items-center gap-1 shrink-0 ml-2">
-                  {ep.label} <ExternalLink className="w-2.5 h-2.5" />
-                </a>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      {/* Orders and Top Products Row */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-
-        {/* Recent Orders */}
-        <div className="lg:col-span-8 glass-card rounded-2xl p-5 space-y-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <ShoppingBag className="w-4 h-4 text-slate-400" />
-              <h2 className="text-sm font-bold text-white">Recent Agent Orders</h2>
-            </div>
-            <button
-              onClick={fetchDashboardData}
-              className="text-xs text-slate-400 hover:text-white flex items-center gap-1 transition-colors cursor-pointer"
-            >
-              <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} /> Refresh
-            </button>
-          </div>
-
-          {recentOrders.length === 0 ? (
-            <div className="py-12 text-center text-xs text-slate-500">
-              No orders placed yet. Launch a customer storefront session to test autonomous order flow!
-            </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-xs">
-                <thead>
-                  <tr className="border-b border-slate-800 text-slate-500 text-left">
-                    <th className="pb-2 font-medium">Order #</th>
-                    <th className="pb-2 font-medium">Customer</th>
-                    <th className="pb-2 font-medium">Items</th>
-                    <th className="pb-2 font-medium">Total</th>
-                    <th className="pb-2 font-medium">Status</th>
-                    <th className="pb-2 font-medium">Action</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-800/40">
-                  {recentOrders.map(order => {
-                    const items = Array.isArray(order.items)
-                      ? order.items
-                      : typeof order.items === 'string'
-                        ? JSON.parse(order.items || '[]')
-                        : [];
-                    const itemCount = items.reduce((s, i) => s + (i.quantity || i.qty || 1), 0);
-                    return (
-                      <tr key={order.id} className="hover:bg-slate-800/20 transition-colors">
-                        <td className="py-3 font-mono text-slate-300 font-semibold">{order.orderNumber}</td>
-                        <td className="py-3 text-white">
-                          <div>{order.customerName || 'Shopper'}</div>
-                          <div className="text-[10px] text-slate-500">{order.customerEmail}</div>
-                        </td>
-                        <td className="py-3 text-slate-400">{itemCount} items</td>
-                        <td className="py-3 font-mono font-bold text-white">
-                          ₹{((order.totalAmountInr ?? ((order.totalAmountPaise || 0) / 100)) || 0).toLocaleString('en-IN')}
-                        </td>
-                        <td className="py-3">
-                          <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold ${
-                            order.status === 'PAID'
-                              ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
-                              : 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
-                          }`}>
-                            {order.status === 'PAID' ? <CheckCircle className="w-2.5 h-2.5" /> : <Clock className="w-2.5 h-2.5" />}
-                            {order.status}
-                          </span>
-                        </td>
-                        <td className="py-3">
-                          {order.paymentLinkUrl && (
-                            <a
-                              href={order.paymentLinkUrl}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="text-blue-400 hover:text-blue-300 flex items-center gap-1 text-[11px]"
-                            >
-                              <ExternalLink className="w-3 h-3" /> Pay Link
-                            </a>
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
-
-        {/* Top Products */}
+        {/* Top Products (4 Cols) */}
         <div className="lg:col-span-4 glass-card rounded-2xl p-5 space-y-4">
           <div className="flex items-center gap-2">
             <Package className="w-4 h-4 text-slate-400" />
-            <h2 className="text-sm font-bold text-white">Top Products</h2>
+            <h2 className="text-sm font-bold text-white">Top Performing Products</h2>
           </div>
           {topProducts.length === 0 ? (
-            <div className="py-8 text-center text-xs text-slate-500">
-              Revenue data will appear here after your first paid orders.
+            <div className="py-12 text-center text-xs text-slate-500">
+              Product sales rankings will appear here after orders are placed.
             </div>
           ) : (
             <div className="space-y-2.5">
               {topProducts.map((p, i) => (
-                <div key={p.sku || i} className="flex items-center gap-3">
-                  <div className={`w-6 h-6 rounded-lg flex items-center justify-center text-[10px] font-bold shrink-0 ${
-                    i === 0 ? 'bg-amber-500/20 text-amber-400' :
-                    i === 1 ? 'bg-slate-500/20 text-slate-300' :
+                <div key={p.sku || i} className="flex items-center gap-3 p-2 rounded-xl bg-slate-950/60 border border-slate-800/80">
+                  <div className={`w-7 h-7 rounded-lg flex items-center justify-center text-[10px] font-bold shrink-0 ${
+                    i === 0 ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30' :
+                    i === 1 ? 'bg-slate-500/20 text-slate-300 border border-slate-500/30' :
                               'bg-slate-800 text-slate-500'
                   }`}>
-                    {i + 1}
+                    #{i + 1}
                   </div>
                   <div className="flex-1 min-w-0">
-                    <div className="text-xs font-medium text-white truncate">{p.name || p.sku}</div>
-                    <div className="text-[10px] text-slate-500">{p.qty || 0} units sold</div>
+                    <div className="text-xs font-semibold text-white truncate">{p.name || p.sku}</div>
+                    <div className="text-[10px] text-slate-400">{p.qty || 0} units sold</div>
                   </div>
                   <div className="text-xs font-mono font-bold text-emerald-400 shrink-0">
                     ₹{(Number(p?.revenueInr) || 0).toLocaleString('en-IN')}
@@ -449,6 +440,88 @@ export default function Overview({ setActiveTab }) {
             </div>
           )}
         </div>
+      </div>
+
+      {/* Recent Orders */}
+      <div className="glass-card rounded-2xl p-5 space-y-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <ShoppingBag className="w-4 h-4 text-slate-400" />
+            <h2 className="text-sm font-bold text-white">Recent Agent Orders</h2>
+          </div>
+          <button
+            onClick={fetchDashboardData}
+            className="text-xs text-slate-400 hover:text-white flex items-center gap-1 transition-colors cursor-pointer"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} /> Refresh
+          </button>
+        </div>
+
+        {recentOrders.length === 0 ? (
+          <div className="py-12 text-center text-xs text-slate-500">
+            No orders placed yet. Launch a customer storefront session to test autonomous order flow!
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="border-b border-slate-800 text-slate-500 text-left">
+                  <th className="pb-2 font-medium">Order #</th>
+                  <th className="pb-2 font-medium">Customer</th>
+                  <th className="pb-2 font-medium">Items</th>
+                  <th className="pb-2 font-medium">Total</th>
+                  <th className="pb-2 font-medium">Status</th>
+                  <th className="pb-2 font-medium">Action</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-800/40">
+                {recentOrders.map(order => {
+                  const items = Array.isArray(order.items)
+                    ? order.items
+                    : typeof order.items === 'string'
+                      ? JSON.parse(order.items || '[]')
+                      : [];
+                  const itemCount = items.reduce((s, i) => s + (i.quantity || i.qty || 1), 0);
+                  return (
+                    <tr key={order.id} className="hover:bg-slate-800/20 transition-colors">
+                      <td className="py-3 font-mono text-slate-300 font-semibold">{order.orderNumber}</td>
+                      <td className="py-3 text-white">
+                        <div>{order.customerName || 'Shopper'}</div>
+                        <div className="text-[10px] text-slate-500">{order.customerEmail}</div>
+                      </td>
+                      <td className="py-3 text-slate-400">{itemCount} items</td>
+                      <td className="py-3 font-mono font-bold text-white">
+                        ₹{((order.totalAmountInr ?? ((order.totalAmountPaise || 0) / 100)) || 0).toLocaleString('en-IN')}
+                      </td>
+                      <td className="py-3">
+                        <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold ${
+                          order.status === 'PAID'
+                            ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                            : 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
+                        }`}>
+                          {order.status === 'PAID' ? <CheckCircle className="w-2.5 h-2.5" /> : <Clock className="w-2.5 h-2.5" />}
+                          {order.status}
+                        </span>
+                      </td>
+                      <td className="py-3">
+                        {order.paymentLinkUrl && (
+                          <a
+                            href={order.paymentLinkUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-blue-400 hover:text-blue-300 flex items-center gap-1 text-[11px]"
+                          >
+                            <ExternalLink className="w-3 h-3" /> Pay Link
+                          </a>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
     </div>
   );

@@ -10,9 +10,6 @@ export default function Navbar({ activeTab, setActiveTab }) {
     { id: 'registry', label: 'Merchant Registry', icon: Store },
     { id: 'storefront', label: 'Store & Checkout AI', icon: Store },
     { id: 'campaigns', label: 'Revenue Campaigns', icon: Sparkles },
-    { id: 'buyer', label: 'AI Buyer Simulator', icon: Bot },
-    { id: 'audit', label: 'Audit & Safety Trail', icon: ShieldCheck },
-    { id: 'failure-lab', label: 'Failure Recovery Lab', icon: AlertTriangle }
   ];
 
   return (
@@ -69,7 +66,7 @@ export default function Navbar({ activeTab, setActiveTab }) {
               <div className="flex items-center gap-2 bg-slate-900 border border-slate-800 rounded-xl p-1.5 pl-3">
                 <div className="text-right hidden sm:block">
                   <div className="text-xs font-semibold text-white truncate max-w-[140px]">{merchant.storeName || merchant.name}</div>
-                  <div className="text-[10px] text-slate-400">Cap: ₹{merchant.spendingCapInr?.toLocaleString('en-IN') || '10,000'}</div>
+                  <div className="text-[10px] text-emerald-400 font-mono">Live Merchant</div>
                 </div>
                 <button
                   onClick={logout}
